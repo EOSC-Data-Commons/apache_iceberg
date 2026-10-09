@@ -45,7 +45,7 @@ def _(iceberg_table):
         "total_bytes",
         "views",
         "downloads",
-        #"raw_json"
+        "raw_json"
     ]
 
     dataset = iceberg_table.scan(selected_fields=LEAN_COLUMNS).to_arrow()
@@ -87,8 +87,6 @@ def _():
 
 @app.cell
 def _(EqualTo, con, iceberg_table):
-
-
     count_reader = iceberg_table.scan(
         row_filter=EqualTo("resource_type", "dataset"),
         selected_fields=["zenodo_id"],
@@ -101,7 +99,8 @@ def _(EqualTo, con, iceberg_table):
 
 @app.cell
 def _(EqualTo, con, iceberg_table):
-
+    # Main result:
+    # Fields present in the Zenodo JSON
 
     def get_datasets_reader():
         return iceberg_table.scan(
@@ -117,6 +116,87 @@ def _(EqualTo, con, iceberg_table):
     """).fetchone()
 
     print(result[0])
+    return
+
+
+@app.cell
+def _():
+    import marimo as mo
+
+    return (mo,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    # Transforming Zenodo JSON into uniform harvest_event JSON
+
+    We'll write a script to reformat the JSON we get from Zenodo into a format that's like datacite_json in the metadata warehouse. This will be the main column in the apache iceberg table.
+    The same process could be repeated for other aggregator dumps into the same apache table, with different transformation format (handled by different .jq files)
+    """)
+    return
+
+
+@app.cell
+def _():
+    import jq
+
+    return (jq,)
+
+
+@app.cell
+def _(jq):
+    # Try a simple transformation that keeps only the title, resource type and creators
+    from pathlib import Path
+    simple_jq_transform = jq.compile(Path("simple_jq_filter.jq").read_text())
+ 
+    return (simple_jq_transform,)
+
+
+@app.cell
+def _(con):
+    zenodo_json = con.sql("""
+        SELECT raw_json
+        FROM dataset LIMIT 1
+    """).fetchone()[0]
+
+    zenodo_json
+    return (zenodo_json,)
+
+
+@app.cell
+def _(simple_jq_transform, zenodo_json):
+    simple_jq_transform.input_text(zenodo_json).text()
+    return
+
+
+@app.cell
+def _(con):
+    all_zenodo_jsons = con.sql("""
+        SELECT raw_json
+        FROM dataset
+    """).fetchall()
+
+    all_zenodo_jsons = [item[0] for item in all_zenodo_jsons]
+
+    all_zenodo_jsons[:5]
+    return (all_zenodo_jsons,)
+
+
+@app.cell
+def _(all_zenodo_jsons, simple_jq_transform):
+    simplified_jsons = []
+
+    for raw_json in all_zenodo_jsons:
+        simplified_jsons.append(
+            simple_jq_transform.input_text(raw_json).text()
+        )
+    return (simplified_jsons,)
+
+
+@app.cell
+def _(simplified_jsons):
+    simplified_jsons[:5]
     return
 
 
