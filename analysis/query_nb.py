@@ -87,8 +87,6 @@ def _():
 
 @app.cell
 def _(EqualTo, con, iceberg_table):
-
-
     count_reader = iceberg_table.scan(
         row_filter=EqualTo("resource_type", "dataset"),
         selected_fields=["zenodo_id"],
@@ -101,6 +99,9 @@ def _(EqualTo, con, iceberg_table):
 
 @app.cell
 def _(EqualTo, con, iceberg_table):
+    # Main result:
+    # Fields present in the Zenodo JSON
+
     def get_datasets_reader():
         return iceberg_table.scan(
             row_filter=EqualTo("resource_type", "dataset"),
