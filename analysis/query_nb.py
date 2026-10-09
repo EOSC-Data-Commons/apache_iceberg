@@ -96,19 +96,6 @@ def _(EqualTo, con, iceberg_table):
 
     con.register("datasets_count_only", count_reader)
     con.sql("SELECT COUNT(*) FROM datasets_count_only;").show()
-    return (count_reader,)
-
-
-@app.cell
-def _(EqualTo, con, count_reader, iceberg_table):
-    count_reader2 = iceberg_table.scan(
-        row_filter=EqualTo("resource_type", "dataset"),
-        selected_fields=["zenodo_id"],
-    ).to_arrow_batch_reader()
-
-    con.register("datasets_count_only", count_reader)
-
-    con.sql("SELECT COUNT(*) FROM datasets_count_only;").show()
     return
 
 
