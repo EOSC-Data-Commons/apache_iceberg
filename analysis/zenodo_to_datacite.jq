@@ -9,30 +9,6 @@ def cap: if . == null or . == "" then null else (.[0:1] | ascii_upcase) + .[1:] 
 # drop null values and empty arrays so optional fields vanish instead of failing validation
 def clean: with_entries(select(.value != null and .value != []));
 
-def general_type:
-  if . == null then "Other"
-  elif . == "dataset" then "Dataset"
-  elif . == "software" then "Software"
-  elif startswith("image") then "Image"
-  elif . == "video" then "Audiovisual"
-  elif . == "physicalobject" then "PhysicalObject"
-  elif startswith("publication") or . == "poster" or . == "presentation" then "Text"
-  else "Other" end;
-
-def title_type:
-  if . == "alternative-title" then "AlternativeTitle"
-  elif . == "subtitle" then "Subtitle"
-  elif . == "translated-title" then "TranslatedTitle"
-  else "Other" end;
-
-def description_type:
-  if . == "abstract" then "Abstract"
-  elif . == "methods" then "Methods"
-  elif . == "technical-info" then "TechnicalInfo"
-  elif . == "seriesinformation" or . == "series-information" then "SeriesInformation"
-  elif . == "tableofcontents" or . == "table-of-contents" then "TableOfContents"
-  else "Other" end;
-
 def id_scheme: if . == "orcid" then "ORCID" elif . == null then null else ascii_upcase end;
 
 def is_full_date: type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$");
@@ -51,7 +27,7 @@ def strip: sub("^\\s+"; "") | sub("\\s+$"; "");
     titles:
       ( [ {title: $m.title} ]
         + [ ($m.additional_titles // [])[]
-            | {title: .title, titleType: (.type.id | title_type)} ]
+            | {title: .title, titleType: .type.id} ]
       ),
 
     creators:
@@ -85,7 +61,7 @@ def strip: sub("^\\s+"; "") | sub("\\s+$"; "");
     descriptions:
       ( [ if $m.description then {description: $m.description, descriptionType: "Abstract"} else empty end ]
         + [ ($m.additional_descriptions // [])[]
-            | {description: .description, descriptionType: (.type.id | description_type)} ]
+            | {description: .description, descriptionType: .type.id} ]
       ),
 
     dates:
@@ -98,7 +74,7 @@ def strip: sub("^\\s+"; "") | sub("\\s+$"; "");
 
     types: ({
       resourceType: $m.resource_type.title.en,
-      resourceTypeGeneral: ($m.resource_type.id | general_type)
+      resourceTypeGeneral: $m.resource_type.id
     } | clean),
 
     rightsList:
