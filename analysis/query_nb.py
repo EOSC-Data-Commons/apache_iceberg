@@ -153,7 +153,7 @@ def _(jq):
     from pathlib import Path
     simple_jq_transform = jq.compile(Path("simple_jq_filter.jq").read_text())
  
-    return (simple_jq_transform,)
+    return Path, simple_jq_transform
 
 
 @app.cell
@@ -227,6 +227,7 @@ def _(ValidationError, datacite_schema, simplified_jsons, validate):
 def _(json):
     # Load the Zenodo schema
     # We inferred this via the analysis module
+    # IMPORTANT - this is the METADATA part of the zenodo json, not the full json!
 
     with open('../resources/zenodo_schema.json') as f2:
         zenodo_schema = json.load(f2)
@@ -260,6 +261,25 @@ def _(ValidationError, all_zenodo_jsons, json, validate, zenodo_schema):
             raise e
 
     print("All zenodo json passed validation!")
+    return
+
+
+@app.cell
+def _(Path, jq):
+    # JQ transformer from zenodo.metadata to datacite
+    zenodo_datacite_transform = jq.compile(Path("zenodo_to_datacite.jq").read_text())
+ 
+    return (zenodo_datacite_transform,)
+
+
+@app.cell
+def _(example_zenodo, zenodo_datacite_transform):
+    zenodo_datacite_transform.input_value(example_zenodo['metadata']).text()
+    return
+
+
+@app.cell
+def _():
     return
 
 
