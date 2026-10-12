@@ -279,7 +279,22 @@ def _(example_zenodo, zenodo_datacite_transform):
 
 
 @app.cell
-def _():
+def _(all_zenodo_jsons, json, zenodo_datacite_transform):
+    transformed_jsons = []
+    for ix2, zenodo_json_el2 in enumerate(all_zenodo_jsons):
+        current_el = json.loads(zenodo_json_el2)['metadata']
+        transformed_json = zenodo_datacite_transform.input_value(current_el).text()
+
+        transformed_jsons.append(
+            json.loads(transformed_json)
+        )
+        
+    return (transformed_jsons,)
+
+
+@app.cell
+def _(transformed_jsons):
+    transformed_jsons
     return
 
 
