@@ -3,9 +3,6 @@
 # Accepts the full Zenodo record (has .metadata, .links, .files). Needed for urls.
 # URLs: We prefer DOI but if it's not available take self_html which is usually a zenodo link
 
-
-def cap: if . == null or . == "" then null else (.[0:1] | ascii_upcase) + .[1:] end;
-
 # drop null values and empty arrays so optional fields vanish instead of failing validation
 def clean: with_entries(select(.value != null and .value != []));
 
@@ -36,7 +33,7 @@ def strip: sub("^\\s+"; "") | sub("\\s+$"; "");
         | select(. != null)
         | {
             creatorName: .name,
-            nameType: (.type | cap),
+            nameType: .type,
             givenName: .given_name,
             familyName: .family_name,
             nameIdentifiers:
@@ -69,7 +66,7 @@ def strip: sub("^\\s+"; "") | sub("\\s+$"; "");
         then {date: $pd, dateType: "Issued"} else empty end ]
       + [ ($m.dates // [])[]
           | select(.date | is_full_date)
-          | {date: .date, dateType: ((.type.id | cap) // "Other")} ]
+          | {date: .date, dateType: (.type.id  // "Other")} ]
     ),
 
     types: ({
