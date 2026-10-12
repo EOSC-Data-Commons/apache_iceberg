@@ -205,7 +205,7 @@ def _(simplified_jsons):
 
 @app.cell
 def _(json):
-    # Load the GOAL schema - datacite format
+    # Load the schema we want to transform into - datacite format
 
     with open('../resources/datacite_schema.json') as f:
         datacite_schema = json.load(f)
@@ -267,8 +267,8 @@ def _(ValidationError, all_zenodo_jsons, json, validate, zenodo_schema):
 
 @app.cell
 def _(Path, jq):
-    # JQ transformer from zenodo.metadata to datacite
-    zenodo_datacite_transform = jq.compile(Path("zenodo_to_datacite.jq").read_text())
+    # JQ transformer from zenodo to datacite
+    zenodo_datacite_transform = jq.compile(Path("../resources/zenodo_to_datacite.jq").read_text())
  
     return (zenodo_datacite_transform,)
 
