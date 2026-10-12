@@ -239,13 +239,14 @@ def _(json):
 @app.cell
 def _(all_zenodo_jsons, json):
     example_zenodo = json.loads(all_zenodo_jsons[0])
-    example_zenodo['metadata']
+    # We pass the whole JSON because url's aren't in metadata
+    example_zenodo
     return (example_zenodo,)
 
 
 @app.cell
 def _(example_zenodo, validate, zenodo_schema):
-    validate(example_zenodo['metadata'], zenodo_schema)
+    validate(example_zenodo["metadata"], zenodo_schema)
     print("Validation succesful!")
     return
 
@@ -274,7 +275,7 @@ def _(Path, jq):
 
 @app.cell
 def _(example_zenodo, zenodo_datacite_transform):
-    zenodo_datacite_transform.input_value(example_zenodo['metadata']).text()
+    zenodo_datacite_transform.input_value(example_zenodo).text()
     return
 
 
@@ -282,19 +283,38 @@ def _(example_zenodo, zenodo_datacite_transform):
 def _(all_zenodo_jsons, json, zenodo_datacite_transform):
     transformed_jsons = []
     for ix2, zenodo_json_el2 in enumerate(all_zenodo_jsons):
-        current_el = json.loads(zenodo_json_el2)['metadata']
+        current_el = json.loads(zenodo_json_el2)
         transformed_json = zenodo_datacite_transform.input_value(current_el).text()
 
         transformed_jsons.append(
             json.loads(transformed_json)
         )
-        
+
     return (transformed_jsons,)
 
 
 @app.cell
 def _(transformed_jsons):
     transformed_jsons
+    return
+
+
+@app.cell
+def _(ValidationError, datacite_schema, transformed_jsons, validate):
+    for ix3, datacite_json_el in enumerate(transformed_jsons):
+        try:
+            current = datacite_json_el
+            validate(current, datacite_schema)
+        except ValidationError as e:
+            print(f"element {ix3} fails validation!")
+            raise e
+
+    print("All datacite json passed validation!")
+    return
+
+
+@app.cell
+def _():
     return
 
 

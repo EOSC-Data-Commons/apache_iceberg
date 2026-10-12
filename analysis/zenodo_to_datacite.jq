@@ -39,8 +39,11 @@ def id_scheme: if . == "orcid" then "ORCID" elif . == null then null else ascii_
 
 def is_full_date: type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$");
 
-. as $m
+. as $rec
+| .metadata as $m
 | {
+    url: ($rec.links.doi
+          // (if $rec.pids.doi.identifier then "https://doi.org/" + $rec.pids.doi.identifier else null end)),
     titles:
       ( [ {title: $m.title} ]
         + [ ($m.additional_titles // [])[]
@@ -62,7 +65,7 @@ def is_full_date: type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$");
                 | clean ]
           }
         | clean ],
-
+    formats: ([ ($rec.files.entries // {}) | .[] | .mimetype ] | map(select(. != null)) | unique),
     subjects:
       [ ($m.subjects // [])[]
         | {subject: .subject, subjectScheme: .scheme}
