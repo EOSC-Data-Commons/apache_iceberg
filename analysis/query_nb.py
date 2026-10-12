@@ -289,13 +289,12 @@ def _(all_zenodo_jsons, json, zenodo_datacite_transform):
         transformed_jsons.append(
             json.loads(transformed_json)
         )
-
     return (transformed_jsons,)
 
 
 @app.cell
 def _(transformed_jsons):
-    transformed_jsons
+    transformed_jsons[:3]
     return
 
 

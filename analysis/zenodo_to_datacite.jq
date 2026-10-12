@@ -1,10 +1,8 @@
-# Transforms a Zenodo record into the DataCite-style structure described by datacite_schema.json.
+# Transforms a Zenodo record JSON into the DataCite schema
 #
-# Accepts EITHER shape as input:
-#   - the full Zenodo record (has .metadata, .links, .files)  -> url and formats are filled in
-#   - just the metadata block (the zenodo_schema.json shape)  -> url and formats are omitted
-#
-# Usage:  jq -c -f zenodo_to_datacite.jq record.json
+# Accepts the full Zenodo record (has .metadata, .links, .files). Needed for urls.
+# URLs: We prefer DOI but if it's not available take self_html which is usually a zenodo link
+
 
 def cap: if . == null or . == "" then null else (.[0:1] | ascii_upcase) + .[1:] end;
 
@@ -39,11 +37,17 @@ def id_scheme: if . == "orcid" then "ORCID" elif . == null then null else ascii_
 
 def is_full_date: type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$");
 
+# Strip extra whitespace
+def strip: sub("^\\s+"; "") | sub("\\s+$"; "");
+
 . as $rec
 | .metadata as $m
+| (($m.publication_date // "") | strip) as $pd
 | {
     url: ($rec.links.doi
-          // (if $rec.pids.doi.identifier then "https://doi.org/" + $rec.pids.doi.identifier else null end)),
+          // (if $rec.pids.doi.identifier then "https://doi.org/" + $rec.pids.doi.identifier else null end)
+          // $rec.links.self_html
+          ),
     titles:
       ( [ {title: $m.title} ]
         + [ ($m.additional_titles // [])[]
@@ -76,7 +80,7 @@ def is_full_date: type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$");
         | {alternateIdentifier: .identifier, alternateIdentifierType: .scheme}
         | clean ],
 
-    publicationYear: ((($m.publication_date // "")[0:4]) | if . == "" then null else . end),
+    publicationYear: ( [ (($m.publication_date // "") | strip) | match("^[0-9]{4}") | .string ] | first ),
 
     descriptions:
       ( [ if $m.description then {description: $m.description, descriptionType: "Abstract"} else empty end ]
@@ -85,12 +89,12 @@ def is_full_date: type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$");
       ),
 
     dates:
-      ( [ if ($m.publication_date | is_full_date)
-          then {date: $m.publication_date, dateType: "Issued"} else empty end ]
-        + [ ($m.dates // [])[]
-            | select(.date | is_full_date)
-            | {date: .date, dateType: ((.type.id | cap) // "Other")} ]
-      ),
+    ( [ if ($pd | is_full_date)
+        then {date: $pd, dateType: "Issued"} else empty end ]
+      + [ ($m.dates // [])[]
+          | select(.date | is_full_date)
+          | {date: .date, dateType: ((.type.id | cap) // "Other")} ]
+    ),
 
     types: ({
       resourceType: $m.resource_type.title.en,
