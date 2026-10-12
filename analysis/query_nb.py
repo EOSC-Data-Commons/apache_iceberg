@@ -139,9 +139,12 @@ def _(mo):
 
 @app.cell
 def _():
+    import json
+    from jsonschema.validators import validate
+    from jsonschema.exceptions import ValidationError
     import jq
 
-    return (jq,)
+    return ValidationError, jq, json, validate
 
 
 @app.cell
@@ -197,6 +200,66 @@ def _(all_zenodo_jsons, simple_jq_transform):
 @app.cell
 def _(simplified_jsons):
     simplified_jsons[:5]
+    return
+
+
+@app.cell
+def _(json):
+    # Load the GOAL schema - datacite format
+
+    with open('../resources/datacite_schema.json') as f:
+        datacite_schema = json.load(f)
+
+    print(datacite_schema)
+    return (datacite_schema,)
+
+
+@app.cell
+def _(ValidationError, datacite_schema, simplified_jsons, validate):
+    try: 
+        validate(simplified_jsons[0], datacite_schema)
+    except ValidationError:
+        print("The simple JSON does not conform to Datacite schema.")
+    return
+
+
+@app.cell
+def _(json):
+    # Load the Zenodo schema
+    # We inferred this via the analysis module
+
+    with open('../resources/zenodo_schema.json') as f2:
+        zenodo_schema = json.load(f2)
+
+    print(zenodo_schema)
+    return (zenodo_schema,)
+
+
+@app.cell
+def _(all_zenodo_jsons, json):
+    example_zenodo = json.loads(all_zenodo_jsons[0])
+    example_zenodo['metadata']
+    return (example_zenodo,)
+
+
+@app.cell
+def _(example_zenodo, validate, zenodo_schema):
+    validate(example_zenodo['metadata'], zenodo_schema)
+    print("Validation succesful!")
+    return
+
+
+@app.cell
+def _(ValidationError, all_zenodo_jsons, json, validate, zenodo_schema):
+    for ix, zenodo_json_el in enumerate(all_zenodo_jsons):
+        try:
+            current_json = json.loads(zenodo_json_el)
+            validate(current_json['metadata'], zenodo_schema)
+        except ValidationError as e:
+            print(f"element {ix} fails validation!")
+            raise e
+
+    print("All zenodo json passed validation!")
     return
 
 
