@@ -12,7 +12,11 @@ dependencies = [
     "boto3>=1.43.110",
     "dotenv>=0.9.9",
     "jsonschema>=4.26.0",
+    "apache-iceberg",
 ]
 
 [tool.uv]
 package = false
+
+[tool.uv.sources]
+apache-iceberg = { path = "../", editable = true }

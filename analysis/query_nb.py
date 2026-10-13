@@ -140,37 +140,13 @@ def _(mo):
 @app.cell
 def _():
     import json
+    from pathlib import Path
     from jsonschema.validators import validate
     from jsonschema.exceptions import ValidationError
-    import jq
 
-    return ValidationError, jq, json, validate
+    from json_manipulation.json_transform import transform_json_zenodo_to_datacite
 
-
-@app.cell
-def _(jq):
-    # Try a simple transformation that keeps only the title, resource type and creators
-    from pathlib import Path
-    simple_jq_transform = jq.compile(Path("simple_jq_filter.jq").read_text())
- 
-    return Path, simple_jq_transform
-
-
-@app.cell
-def _(con):
-    zenodo_json = con.sql("""
-        SELECT raw_json
-        FROM dataset LIMIT 1
-    """).fetchone()[0]
-
-    zenodo_json
-    return (zenodo_json,)
-
-
-@app.cell
-def _(simple_jq_transform, zenodo_json):
-    simple_jq_transform.input_text(zenodo_json).text()
-    return
+    return ValidationError, json, transform_json_zenodo_to_datacite, validate
 
 
 @app.cell
@@ -187,23 +163,6 @@ def _(con):
 
 
 @app.cell
-def _(all_zenodo_jsons, simple_jq_transform):
-    simplified_jsons = []
-
-    for raw_json in all_zenodo_jsons:
-        simplified_jsons.append(
-            simple_jq_transform.input_text(raw_json).text()
-        )
-    return (simplified_jsons,)
-
-
-@app.cell
-def _(simplified_jsons):
-    simplified_jsons[:5]
-    return
-
-
-@app.cell
 def _(json):
     # Load the schema we want to transform into - datacite format
 
@@ -212,15 +171,6 @@ def _(json):
 
     print(datacite_schema)
     return (datacite_schema,)
-
-
-@app.cell
-def _(ValidationError, datacite_schema, simplified_jsons, validate):
-    try: 
-        validate(simplified_jsons[0], datacite_schema)
-    except ValidationError:
-        print("The simple JSON does not conform to Datacite schema.")
-    return
 
 
 @app.cell
@@ -266,25 +216,17 @@ def _(ValidationError, all_zenodo_jsons, json, validate, zenodo_schema):
 
 
 @app.cell
-def _(Path, jq):
-    # JQ transformer from zenodo to datacite
-    zenodo_datacite_transform = jq.compile(Path("../resources/zenodo_to_datacite.jq").read_text())
- 
-    return (zenodo_datacite_transform,)
-
-
-@app.cell
-def _(example_zenodo, zenodo_datacite_transform):
-    zenodo_datacite_transform.input_value(example_zenodo).text()
+def _(example_zenodo, transform_json_zenodo_to_datacite):
+    transform_json_zenodo_to_datacite(example_zenodo)
     return
 
 
 @app.cell
-def _(all_zenodo_jsons, json, zenodo_datacite_transform):
+def _(all_zenodo_jsons, json, transform_json_zenodo_to_datacite):
     transformed_jsons = []
     for ix2, zenodo_json_el2 in enumerate(all_zenodo_jsons):
         current_el = json.loads(zenodo_json_el2)
-        transformed_json = zenodo_datacite_transform.input_value(current_el).text()
+        transformed_json = transform_json_zenodo_to_datacite(current_el)
 
         transformed_jsons.append(
             json.loads(transformed_json)
@@ -309,11 +251,6 @@ def _(ValidationError, datacite_schema, transformed_jsons, validate):
             raise e
 
     print("All datacite json passed validation!")
-    return
-
-
-@app.cell
-def _():
     return
 
 
