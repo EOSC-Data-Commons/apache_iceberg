@@ -9,7 +9,14 @@ dependencies = [
     "marimo>=0.1.0",
     "tqdm>=4.66.0",
     "jq>=1.12.0",
+    "boto3>=1.43.110",
+    "dotenv>=0.9.9",
+    "jsonschema>=4.26.0",
+    "apache-iceberg",
 ]
 
 [tool.uv]
 package = false
+
+[tool.uv.sources]
+apache-iceberg = { path = "../", editable = true }

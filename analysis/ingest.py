@@ -4,7 +4,7 @@ import pyarrow as pa
 from pyiceberg.catalog import load_catalog
 from tqdm import tqdm
 
-JSON_DIR_PATH = "/tmp/zenodo_records"
+JSON_DIR_PATH = "./tenk"
 WAREHOUSE_PATH = os.path.abspath("./iceberg_warehouse")
 FILES_PER_CHUNK = 5000
 CHUNK_SIZE = 50000
