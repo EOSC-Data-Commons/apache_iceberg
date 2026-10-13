@@ -6,8 +6,6 @@
 # drop null values and empty arrays so optional fields vanish instead of failing validation
 def clean: with_entries(select(.value != null and .value != []));
 
-def id_scheme: if . == "orcid" then "ORCID" elif . == null then null else ascii_upcase end;
-
 def is_full_date: type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$");
 
 # Strip extra whitespace
@@ -38,7 +36,7 @@ def strip: sub("^\\s+"; "") | sub("\\s+$"; "");
             familyName: .family_name,
             nameIdentifiers:
               [ (.identifiers // [])[]
-                | {nameIdentifierScheme: (.scheme | id_scheme), nameIdentifier: .identifier}
+                | {nameIdentifierScheme: .scheme, nameIdentifier: .identifier}
                 | clean ]
           }
         | clean ],
