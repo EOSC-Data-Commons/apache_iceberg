@@ -9,16 +9,25 @@ import hashlib
 import time
 
 
-# A class to keep tally of successful and unsuccesful uploads,
-# with a way to log all errors to a file
 class UploadStats:
+    """
+    A class to keep tally of successful and unsuccesful uploads.
+
+    Worker threads call ``ok()`` and ``fail()``; the main thread reads the
+    totals and can write the failures to a log file with ``log_errors()``.
+
+    Attributes:
+        uploaded (int): Number of objects uploaded successfully.
+        errors (list[tuple[str, Exception]]): ``(key, exception)`` pairs for
+            record id, error message for every failed upload.
+    """
     def __init__(self):
         self.lock = threading.Lock()
         self.uploaded = 0
         self.errors = []
 
     def ok(self):
-        # Count a record as successfully uploaded
+        """Count a record as successfully uploaded"""
         with self.lock:
             self.uploaded += 1
             n = self.uploaded
@@ -26,7 +35,7 @@ class UploadStats:
             print(f"{n} files uploaded")
 
     def fail(self, key, exc):
-        # Log an error and what record it occured on
+        """Log an error and what record it occured on"""
         with self.lock:
             self.errors.append((key, exc))
 
@@ -103,6 +112,9 @@ def download_resumable(url, path, total, headers, chunk=4 * 1024 * 1024):
 
 
 def md5_of(path):
+    """
+    Get md5 hash of file at path.
+    """
     h = hashlib.md5()
     with open(path, "rb") as f:
         for block in iter(lambda: f.read(8 * 1024 * 1024), b""):
@@ -128,7 +140,7 @@ def upload(
         s3_client: boto3 S3 client, shared across workers.
         bucket (str): Name of the destination bucket.
         key (str): Object key to write, e.g. ``"zenodo_dump/1003105.json"``.
-        data (bytes): Full object content, already read into memory.
+        data (bytes): Full object content read into memory.
         stats (UploadStats): Results tally ; ``ok()`` is called on
             success and ``fail(key, exc)`` on any exception.
         slots (threading.BoundedSemaphore): Semaphore acquired
