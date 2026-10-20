@@ -6,8 +6,12 @@
 # Uploading is done in parallel with multiple workers - can take multiple hours locally
 # to process all records!
 
-print("Script " + __file__ + " started.")
+# --bucket Mandatory! S3 bucket to upload the dump to.
+# --local-file defines the filepath of the .tar.gz to download. Start at project root.
+# --cleanup-local-dump can be set to "yes" to delete the downloaded .tar.gz after the script finishes
 
+
+import argparse
 import os
 from dotenv import load_dotenv
 import tarfile
@@ -27,94 +31,118 @@ ACCESS_KEY = os.getenv("S3_ACCESS_KEY")
 SECRET_KEY = os.getenv("S3_SECRET_KEY")
 S3_ENDPOINT = os.getenv("S3_ENDPOINT")
 
-BUCKET = "test_zenodo_dump2"
-PREFIX = "zenodo_dump/"
+def parse_args() -> argparse.Namespace:
+    """
+    Define command-line arguments.
+    The only mandatory is --bucket, the S3 bucket to create/upload to.
+    """
+    parser = argparse.ArgumentParser(description="Download the newest Zenodo dump and upload it to S3.")
+    parser.add_argument("--bucket", required=True, help="destination S3 bucket")
+    parser.add_argument("--local-file", default="records-json.tar.gz", help="where to store the downloaded dump")
+    parser.add_argument(
+        "--cleanup-local-dump",
+        choices=["yes", "no"],
+        default="no",
+        help="yes/no: delete the local dump after a successful upload",
+        )
+    return parser.parse_args()
 
-# We'll first download the file locally, then stream it to S3. Otherwise direct streaming fails
-LOCAL_FILE = "records-json.tar.gz"
+def main(bucket: str, local_file: str, cleanup_local_dump: str):
+    print("Script " + __file__ + " started.")
 
-# Stream to s3 in parallel
-WORKERS = 16
+    BUCKET = bucket
+    PREFIX = "zenodo_dump/"
 
-# Headers identifying us as the requester
-HEADERS = {
-    "User-Agent": f"zenodo-iceberg-loader(v0.1) / {os.environ['REQUESTER_EMAIL']}",
-}
+    # We'll first download the file locally, then stream it to S3. Otherwise direct streaming fails
+    LOCAL_FILE = local_file
 
-s3_client = connect_to_s3(ACCESS_KEY, SECRET_KEY, S3_ENDPOINT)
+    # Stream to s3 in parallel
+    WORKERS = 16
 
-# Create bucket if it doesn't already exist
+    # Headers identifying us as the requester
+    HEADERS = {
+        "User-Agent": f"zenodo-iceberg-loader(v0.1) / {os.environ['REQUESTER_EMAIL']}",
+    }
 
-try:
-    s3_client.head_bucket(Bucket=BUCKET)
-    print(f"Bucket {BUCKET} already exists.")
-except ClientError as e:
-    if e.response["Error"]["Code"] in ("404", "NoSuchBucket"):
-        s3_client.create_bucket(Bucket=BUCKET)
-        print(f"Bucker {BUCKET} created.")
-    else:
-        raise
+    s3_client = connect_to_s3(ACCESS_KEY, SECRET_KEY, S3_ENDPOINT)
 
-# Zenodo dump ---
-# Download the latest version of the JSON metadata dump
+    # Create bucket if it doesn't already exist
 
-resp = requests.get("https://zenodo.org/api/exporter", timeout=30, headers=HEADERS)
-resp.raise_for_status()
+    try:
+        s3_client.head_bucket(Bucket=BUCKET)
+        print(f"Bucket {BUCKET} already exists.")
+    except ClientError as e:
+        if e.response["Error"]["Code"] in ("404", "NoSuchBucket"):
+            s3_client.create_bucket(Bucket=BUCKET)
+            print(f"Bucker {BUCKET} created.")
+        else:
+            raise
 
-versions = resp.json()["records-json.tar.gz"]  # The JSON version of full metadata dump
-newest = max(versions, key=lambda v: datetime.fromisoformat(v["created"]))
+    # Zenodo dump ---
+    # Download the latest version of the JSON metadata dump
 
-zenodo_metadata_url = newest["links"]["self"]  # URL to download the dump
-zenodo_metadata_date = newest["created"]
+    resp = requests.get("https://zenodo.org/api/exporter", timeout=30, headers=HEADERS)
+    resp.raise_for_status()
 
-# Expected hash for validation, as well as expectedfilesize
-EXPECTED_MD5 = newest["checksum"].removeprefix("md5:")
-EXPECTED_SIZE = int(newest["size"])
+    versions = resp.json()["records-json.tar.gz"]  # The JSON version of full metadata dump
+    newest = max(versions, key=lambda v: datetime.fromisoformat(v["created"]))
 
-print("Latest metadata dump: ")
-print(zenodo_metadata_url, zenodo_metadata_date)
+    zenodo_metadata_url = newest["links"]["self"]  # URL to download the dump
+    zenodo_metadata_date = newest["created"]
 
-# Download file locally
-# Lengthy!
-download_resumable(zenodo_metadata_url, LOCAL_FILE, EXPECTED_SIZE, HEADERS)
-actual = md5_of(LOCAL_FILE)
+    # Expected hash for validation, as well as expectedfilesize
+    EXPECTED_MD5 = newest["checksum"].removeprefix("md5:")
+    EXPECTED_SIZE = int(newest["size"])
 
-# Checksum matches expeted?
-# if corrupt file: remove it so the next run starts clean
-if actual != EXPECTED_MD5:
-    os.remove(LOCAL_FILE)
-    raise RuntimeError(f"checksum mismatch: {actual} != {EXPECTED_MD5}")
-print("Download complete and verified.")
+    print("Latest metadata dump: ")
+    print(zenodo_metadata_url, zenodo_metadata_date)
+
+    # Download file locally
+    # Lengthy!
+    download_resumable(zenodo_metadata_url, LOCAL_FILE, EXPECTED_SIZE, HEADERS)
+    actual = md5_of(LOCAL_FILE)
+
+    # Checksum matches expeted?
+    # if corrupt file: remove it so the next run starts clean
+    if actual != EXPECTED_MD5:
+        os.remove(LOCAL_FILE)
+        raise RuntimeError(f"checksum mismatch: {actual} != {EXPECTED_MD5}")
+    print("Download complete and verified.")
 
 
-# Setup threading pool to upload to s3 in parallel
+    # Setup threading pool to upload to s3 in parallel
 
-slots = threading.BoundedSemaphore(WORKERS * 4)
-errors, uploaded, lock = [], 0, threading.Lock()
-stats = UploadStats()
+    slots = threading.BoundedSemaphore(WORKERS * 4)
+    errors, uploaded, lock = [], 0, threading.Lock()
+    stats = UploadStats()
 
-print("Starting upload to S3.")
+    print("Starting upload to S3.")
 
-with ThreadPoolExecutor(WORKERS) as pool:
-    with tarfile.open(LOCAL_FILE, mode="r|gz") as tar:
-        for member in tar:
-            if not member.isfile():
-                continue
-            data = tar.extractfile(member).read()
-            slots.acquire()
-            pool.submit(
-                upload, s3_client, BUCKET, PREFIX + member.name, data, stats, slots
-            )
-            # Testing - stop at 20000 files
-            current = stats.uploaded
-            if current >= 20000:
-                break
+    with ThreadPoolExecutor(WORKERS) as pool:
+        with tarfile.open(LOCAL_FILE, mode="r|gz") as tar:
+            for member in tar:
+                if not member.isfile():
+                    continue
+                data = tar.extractfile(member).read()
+                slots.acquire()
+                pool.submit(
+                    upload, s3_client, BUCKET, PREFIX + member.name, data, stats, slots
+                )
+                # Testing - stop at 20000 files
+                current = stats.uploaded
+                if current >= 20000:
+                    break
 
-print(f"done: {stats.uploaded} uploaded, {len(stats.errors)} failed")
+    print(f"done: {stats.uploaded} uploaded, {len(stats.errors)} failed")
 
-# Write down any errors and the files they occurred at in a log
-log_name = BUCKET + "_errors.log"
+    # Write down any errors and the files they occurred at in a log
+    log_name = BUCKET + "_errors.log"
 
-stats.log_errors(log_name)
+    stats.log_errors(log_name)
 
-print("Script " + __file__ + " complete.")
+    print("Script " + __file__ + " complete.")
+
+
+if __name__ == "__main__":
+    args = parse_args()
+    main(args.bucket, args.local_file, args.cleanup_local_dump)
