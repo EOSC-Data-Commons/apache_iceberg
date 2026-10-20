@@ -37,14 +37,14 @@ def _(load_dotenv, os):
     SECRET_KEY = os.getenv("S3_SECRET_KEY")
     S3_ENDPOINT = os.getenv("S3_ENDPOINT")
 
-    BUCKET = "test_zenodo_dump"
+    BUCKET = "test_zenodo_dump2"
     PREFIX = "zenodo_dump/"
 
     # We'll first download the file locally, then stream it to S3. Otherwise direct streaming fails
     LOCAL_FILE = "records-json.tar.gz"
 
     # Stream to s3 in parallel
-    WORKERS = 32
+    WORKERS = 16
     return (
         ACCESS_KEY,
         BUCKET,
@@ -73,18 +73,16 @@ def _(ACCESS_KEY, S3_ENDPOINT, SECRET_KEY, connect_to_s3):
 
 
 @app.cell
-def _(s3_client):
+def _(BUCKET, s3_client):
     # Create the bucket if it doesn't already exist
     from botocore.exceptions import ClientError
 
-    bucket = "test_zenodo_dump"
-
     try:
-        s3_client.head_bucket(Bucket=bucket)
-        print("bucket exists")
+        s3_client.head_bucket(Bucket=BUCKET)
+        print("Bucket already exists.")
     except ClientError as e:
         if e.response["Error"]["Code"] in ("404", "NoSuchBucket"):
-            s3_client.create_bucket(Bucket=bucket)
+            s3_client.create_bucket(Bucket=BUCKET)
         else:
             raise 
     return
@@ -170,27 +168,20 @@ def _(
                 data = tar.extractfile(member).read()
                 slots.acquire()
                 pool.submit(upload, s3_client, BUCKET, PREFIX + member.name, data, stats, slots)
+                # Testing - stop at 20000 files
+                current = stats.uploaded
+                if current >= 20000:
+                    break
 
     print(f"done: {stats.uploaded} uploaded, {len(stats.errors)} failed")
     return
 
 
 @app.cell
-def _(stats):
-    stats.errors[:30]
-    return
+def _(BUCKET, stats):
+    log_name = BUCKET + "_errors.log"
 
-
-@app.cell
-def _(stats):
-    stats.log_errors("zenodo_errors.log")
-    return
-
-
-@app.cell
-def _():
-    abc = [1, 2, 3]
-    abc[:5]
+    stats.log_errors(log_name)
     return
 
 
