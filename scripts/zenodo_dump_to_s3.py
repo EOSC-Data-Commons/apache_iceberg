@@ -31,21 +31,29 @@ ACCESS_KEY = os.getenv("S3_ACCESS_KEY")
 SECRET_KEY = os.getenv("S3_SECRET_KEY")
 S3_ENDPOINT = os.getenv("S3_ENDPOINT")
 
+
 def parse_args() -> argparse.Namespace:
     """
     Define command-line arguments.
     The only mandatory is --bucket, the S3 bucket to create/upload to.
     """
-    parser = argparse.ArgumentParser(description="Download the newest Zenodo dump and upload it to S3.")
+    parser = argparse.ArgumentParser(
+        description="Download the newest Zenodo dump and upload it to S3."
+    )
     parser.add_argument("--bucket", required=True, help="destination S3 bucket")
-    parser.add_argument("--local-file", default="records-json.tar.gz", help="where to store the downloaded dump")
+    parser.add_argument(
+        "--local-file",
+        default="records-json.tar.gz",
+        help="file path where the downloaded dump will be stored",
+    )
     parser.add_argument(
         "--cleanup-local-dump",
         choices=["yes", "no"],
         default="no",
         help="yes/no: delete the local dump after a successful upload",
-        )
+    )
     return parser.parse_args()
+
 
 def main(bucket: str, local_file: str, cleanup_local_dump: str):
     print("Script " + __file__ + " started.")
@@ -84,7 +92,9 @@ def main(bucket: str, local_file: str, cleanup_local_dump: str):
     resp = requests.get("https://zenodo.org/api/exporter", timeout=30, headers=HEADERS)
     resp.raise_for_status()
 
-    versions = resp.json()["records-json.tar.gz"]  # The JSON version of full metadata dump
+    versions = resp.json()[
+        "records-json.tar.gz"
+    ]  # The JSON version of full metadata dump
     newest = max(versions, key=lambda v: datetime.fromisoformat(v["created"]))
 
     zenodo_metadata_url = newest["links"]["self"]  # URL to download the dump
@@ -108,7 +118,6 @@ def main(bucket: str, local_file: str, cleanup_local_dump: str):
         os.remove(LOCAL_FILE)
         raise RuntimeError(f"checksum mismatch: {actual} != {EXPECTED_MD5}")
     print("Download complete and verified.")
-
 
     # Setup threading pool to upload to s3 in parallel
 
@@ -139,6 +148,11 @@ def main(bucket: str, local_file: str, cleanup_local_dump: str):
     log_name = BUCKET + "_errors.log"
 
     stats.log_errors(log_name)
+
+    # Optionally: if indicated, delete the local dump file to free up space
+    if cleanup_local_dump == "yes":
+        os.remove(local_file)
+        print(f"Deleted {local_file}.")
 
     print("Script " + __file__ + " complete.")
 
