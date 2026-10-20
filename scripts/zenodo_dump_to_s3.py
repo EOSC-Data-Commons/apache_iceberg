@@ -53,19 +53,18 @@ except ClientError as e:
         s3_client.create_bucket(Bucket=BUCKET)
         print(f"Bucker {BUCKET} created.")
     else:
-        raise 
+        raise
 
 # Zenodo dump ---
 # Download the latest version of the JSON metadata dump
 
-resp = requests.get("https://zenodo.org/api/exporter", timeout=30,
-                   headers = HEADERS)
+resp = requests.get("https://zenodo.org/api/exporter", timeout=30, headers=HEADERS)
 resp.raise_for_status()
 
-versions = resp.json()["records-json.tar.gz"] # The JSON version of full metadata dump
+versions = resp.json()["records-json.tar.gz"]  # The JSON version of full metadata dump
 newest = max(versions, key=lambda v: datetime.fromisoformat(v["created"]))
 
-zenodo_metadata_url = newest["links"]["self"] # URL to download the dump
+zenodo_metadata_url = newest["links"]["self"]  # URL to download the dump
 zenodo_metadata_date = newest["created"]
 
 # Expected hash for validation, as well as expectedfilesize
@@ -83,7 +82,7 @@ actual = md5_of(LOCAL_FILE)
 # Checksum matches expeted?
 # if corrupt file: remove it so the next run starts clean
 if actual != EXPECTED_MD5:
-    os.remove(LOCAL_FILE)   
+    os.remove(LOCAL_FILE)
     raise RuntimeError(f"checksum mismatch: {actual} != {EXPECTED_MD5}")
 print("Download complete and verified.")
 
@@ -103,7 +102,9 @@ with ThreadPoolExecutor(WORKERS) as pool:
                 continue
             data = tar.extractfile(member).read()
             slots.acquire()
-            pool.submit(upload, s3_client, BUCKET, PREFIX + member.name, data, stats, slots)
+            pool.submit(
+                upload, s3_client, BUCKET, PREFIX + member.name, data, stats, slots
+            )
             # Testing - stop at 20000 files
             current = stats.uploaded
             if current >= 20000:

@@ -21,3 +21,8 @@ build-backend = "hatchling.build"
 
 [tool.marimo.runtime]
 pythonpath = ["src"]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.17.1",
+]

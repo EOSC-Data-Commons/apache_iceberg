@@ -8,6 +8,7 @@ import requests
 import hashlib
 import time
 
+
 # A class to keep tally of successful and unsuccesful uploads,
 # with a way to log all errors to a file
 class UploadStats:
@@ -36,12 +37,15 @@ class UploadStats:
         After the upload is complete, this allows for an easy overview of potential errors.
         """
         with self.lock:
-            errors = list(self.errors)          # snapshot so it can't change mid-write
+            errors = list(self.errors)  # snapshot so it can't change mid-write
         with open(file, "w", encoding="utf-8") as f:
             for key, exc in errors:
-                msg = " ".join(str(exc).split())  # collapse newlines so each error is one line
+                msg = " ".join(
+                    str(exc).split()
+                )  # collapse newlines so each error is one line
                 f.write(f"{key} - {msg}\n")
         print(f"wrote {len(errors)} errors to {file}")
+
 
 def connect_to_s3(access_key: str, secret_key: str, endpoint: str) -> boto3.client:
     """Connect to S3 with a singleton per credentials"""
@@ -59,6 +63,7 @@ def connect_to_s3(access_key: str, secret_key: str, endpoint: str) -> boto3.clie
         ),
     )
 
+
 def download_resumable(url, path, total, headers, chunk=4 * 1024 * 1024):
     """
     Continue from specific byte-number if error occurs
@@ -72,7 +77,9 @@ def download_resumable(url, path, total, headers, chunk=4 * 1024 * 1024):
         if have:
             req_headers["Range"] = f"bytes={have}-"
         try:
-            with requests.get(url, headers=req_headers, stream=True, timeout=(10, 120)) as r:
+            with requests.get(
+                url, headers=req_headers, stream=True, timeout=(10, 120)
+            ) as r:
                 r.raise_for_status()
                 if have and r.status_code != 206:
                     print("server ignored Range; restarting from zero")
@@ -87,10 +94,13 @@ def download_resumable(url, path, total, headers, chunk=4 * 1024 * 1024):
         except (requests.exceptions.RequestException, OSError) as e:
             attempt += 1
             now = os.path.getsize(path) if os.path.exists(path) else 0
-            print(f"interrupted at {now / 1e6:.0f} MB (retry {attempt}): {type(e).__name__}")
+            print(
+                f"interrupted at {now / 1e6:.0f} MB (retry {attempt}): {type(e).__name__}"
+            )
             time.sleep(min(60, 2 ** min(attempt, 6)))
             continue
-        attempt = 0   # a clean pass resets the counter; loop re-checks size
+        attempt = 0  # a clean pass resets the counter; loop re-checks size
+
 
 def md5_of(path):
     h = hashlib.md5()
@@ -99,13 +109,15 @@ def md5_of(path):
             h.update(block)
     return h.hexdigest()
 
+
 def upload(
     s3_client: boto3.client,
     bucket: str,
     key: str,
     data: bytes,
     stats: UploadStats,
-    slots: threading.BoundedSemaphore) -> None:
+    slots: threading.BoundedSemaphore,
+) -> None:
     """Upload one object to S3 and record the outcome.
 
     Can be run in a worker thread. It never raises exceptions: success or failure is
