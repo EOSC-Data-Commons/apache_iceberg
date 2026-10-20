@@ -13,6 +13,24 @@ def _():
     from concurrent.futures import ThreadPoolExecutor
     import threading
 
+    from s3_upload import UploadStats, connect_to_s3, download_resumable, md5_of, upload
+
+    return (
+        ThreadPoolExecutor,
+        UploadStats,
+        connect_to_s3,
+        download_resumable,
+        load_dotenv,
+        md5_of,
+        os,
+        tarfile,
+        threading,
+        upload,
+    )
+
+
+@app.cell
+def _(load_dotenv, os):
     load_dotenv("../.env", override=True)
 
     ACCESS_KEY = os.getenv("S3_ACCESS_KEY")
@@ -34,12 +52,7 @@ def _():
         PREFIX,
         S3_ENDPOINT,
         SECRET_KEY,
-        ThreadPoolExecutor,
         WORKERS,
-        hashlib,
-        os,
-        tarfile,
-        threading,
     )
 
 
@@ -51,37 +64,6 @@ def _(os):
         "User-Agent": f"zenodo-iceberg-loader(v0.1) / {os.environ['REQUESTER_EMAIL']}",
     }
     return (HEADERS,)
-
-
-@app.cell
-def _():
-    """Connect to s3"""
-
-    from functools import cache
-
-    import boto3
-    from boto3.session import Session
-    from botocore.config import Config
-
-
-    @cache
-    def connect_to_s3(access_key: str, secret_key: str, endpoint: str) -> boto3.client:
-        """Connect to S3 with a singleton per credentials"""
-        session = Session()
-        return session.client(
-            service_name="s3",
-            aws_access_key_id=access_key,
-            aws_secret_access_key=secret_key,
-            endpoint_url=str(endpoint),
-            # Don't add checksums unless required,
-            # Leaving this out results in errors uploading .tar records
-            config=Config(
-                request_checksum_calculation="when_required",
-                response_checksum_validation="when_required",
-            ),
-        )
-
-    return (connect_to_s3,)
 
 
 @app.cell
@@ -130,59 +112,7 @@ def _(HEADERS):
     EXPECTED_SIZE = int(newest["size"])
 
     print(zenodo_metadata_url, zenodo_metadata_date)
-    return EXPECTED_MD5, EXPECTED_SIZE, requests, zenodo_metadata_url
-
-
-@app.cell
-def _(os, requests, time):
-    def download_resumable(url, path, total, headers, chunk=4 * 1024 * 1024):
-        """
-        Continue from specific byte-number if error occurs
-        """
-        attempt = 0
-        while True:
-            have = os.path.getsize(path) if os.path.exists(path) else 0
-            if have >= total:
-                return
-            req_headers = dict(headers)
-            if have:
-                req_headers["Range"] = f"bytes={have}-"
-            try:
-                with requests.get(url, headers=req_headers, stream=True, timeout=(10, 120)) as r:
-                    r.raise_for_status()
-                    if have and r.status_code != 206:
-                        print("server ignored Range; restarting from zero")
-                        have = 0
-                    with open(path, "ab" if have else "wb") as f:
-                        # raw stream, no decoding: the file is already a .gz and must stay byte-identical
-                        for block in r.raw.stream(chunk, decode_content=False):
-                            f.write(block)
-                            have += len(block)
-                            if have % (256 * 1024 * 1024) < chunk:
-                                print(f"{have / 1e9:.2f} / {total / 1e9:.2f} GB")
-            except (requests.exceptions.RequestException, OSError) as e:
-                attempt += 1
-                now = os.path.getsize(path) if os.path.exists(path) else 0
-                print(f"interrupted at {now / 1e6:.0f} MB (retry {attempt}): {type(e).__name__}")
-                time.sleep(min(60, 2 ** min(attempt, 6)))
-                continue
-            attempt = 0   # a clean pass resets the counter; loop re-checks size
-
-
-
-    return (download_resumable,)
-
-
-@app.cell
-def _(hashlib):
-    def md5_of(path):
-        h = hashlib.md5()
-        with open(path, "rb") as f:
-            for block in iter(lambda: f.read(8 * 1024 * 1024), b""):
-                h.update(block)
-        return h.hexdigest()
-
-    return (md5_of,)
+    return EXPECTED_MD5, EXPECTED_SIZE, zenodo_metadata_url
 
 
 @app.cell
@@ -214,42 +144,9 @@ def _(WORKERS, threading):
 
 
 @app.cell
-def _(threading):
-    class UploadStats:
-        def __init__(self):
-            self.lock = threading.Lock()
-            self.uploaded = 0
-            self.errors = []
-
-        def ok(self):
-            with self.lock:
-                self.uploaded += 1
-                n = self.uploaded
-            if n % 10_000 == 0:
-                print(f"{n} files uploaded")
-
-        def fail(self, key, exc):
-            with self.lock:
-                self.errors.append((key, exc))
-
-    return (UploadStats,)
-
-
-@app.cell
 def _(UploadStats):
     stats = UploadStats()
     return (stats,)
-
-
-@app.function
-def upload(s3_client, bucket, key, data, stats, slots):
-    try:
-        s3_client.put_object(Bucket=bucket, Key=key, Body=data)
-        stats.ok()
-    except Exception as e:
-        stats.fail(key, e)
-    finally:
-        slots.release()
 
 
 @app.cell
@@ -263,6 +160,7 @@ def _(
     slots,
     stats,
     tarfile,
+    upload,
 ):
     with ThreadPoolExecutor(WORKERS) as pool:
         with tarfile.open(LOCAL_FILE, mode="r|gz") as tar:
@@ -278,7 +176,21 @@ def _(
 
 
 @app.cell
+def _(stats):
+    stats.errors[:30]
+    return
+
+
+@app.cell
+def _(stats):
+    stats.log_errors("zenodo_errors.log")
+    return
+
+
+@app.cell
 def _():
+    abc = [1, 2, 3]
+    abc[:5]
     return
 
 
