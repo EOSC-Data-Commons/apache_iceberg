@@ -82,7 +82,7 @@ def main(bucket: str, local_file: str, cleanup_local_dump: str):
     except ClientError as e:
         if e.response["Error"]["Code"] in ("404", "NoSuchBucket"):
             s3_client.create_bucket(Bucket=BUCKET)
-            print(f"Bucker {BUCKET} created.")
+            print(f"Bucket {BUCKET} created.")
         else:
             raise
 
@@ -92,9 +92,8 @@ def main(bucket: str, local_file: str, cleanup_local_dump: str):
     resp = requests.get("https://zenodo.org/api/exporter", timeout=30, headers=HEADERS)
     resp.raise_for_status()
 
-    versions = resp.json()[
-        "records-json.tar.gz"
-    ]  # The JSON version of full metadata dump
+    # The JSON version of full metadata dump
+    versions = resp.json()["records-json.tar.gz"]
     newest = max(versions, key=lambda v: datetime.fromisoformat(v["created"]))
 
     zenodo_metadata_url = newest["links"]["self"]  # URL to download the dump
@@ -110,19 +109,18 @@ def main(bucket: str, local_file: str, cleanup_local_dump: str):
     # Download file locally
     # Lengthy!
     download_resumable(zenodo_metadata_url, LOCAL_FILE, EXPECTED_SIZE, HEADERS)
-    actual = md5_of(LOCAL_FILE)
+    actual_md5 = md5_of(LOCAL_FILE)
 
-    # Checksum matches expeted?
+    # Checksum matches expected?
     # if corrupt file: remove it so the next run starts clean
-    if actual != EXPECTED_MD5:
+    if actual_md5 != EXPECTED_MD5:
         os.remove(LOCAL_FILE)
-        raise RuntimeError(f"checksum mismatch: {actual} != {EXPECTED_MD5}")
+        raise RuntimeError(f"checksum mismatch: {actual_md5} != {EXPECTED_MD5}")
     print("Download complete and verified.")
 
     # Setup threading pool to upload to s3 in parallel
 
     slots = threading.BoundedSemaphore(WORKERS * 4)
-    errors, uploaded, lock = [], 0, threading.Lock()
     stats = UploadStats()
 
     print("Starting upload to S3.")
