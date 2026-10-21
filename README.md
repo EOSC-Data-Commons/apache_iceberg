@@ -2,7 +2,14 @@
 
 Currently used to setup an initial harvest of Zenodo metadata.
 
-## Push Zenodo metadata dump to S3
+## Exploratory modules  
+
+### Zenodo JSON Analysis module
+More info in the [module's README](analysis/README.md).
+
+## Scripts  
+
+### Push Zenodo metadata dump to S3
 A script fills a S3 bucket with the contents of the latest Zenodo metadata dump.
 
 To run the script, execute the following:  
@@ -18,9 +25,9 @@ It goes through the following steps:
 
 Note: Downloading the .tar.gz dump requires about 13GB of space and might take minutes. Uploading the millions of records may take **hours**!
 
-## Define Apache Iceberg tables
+### Define Apache Iceberg tables
 TODO Table definitions, fill tables based on S3 contents
 
-## Use Iceberg records as "harvest_events" in ***Metadata Warehouse***
-TODO
+### Use Iceberg records as "harvest_events" in ***Metadata Warehouse***
+TODO  
 ? In which repository should this script live?
