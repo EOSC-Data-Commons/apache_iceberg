@@ -2,6 +2,8 @@
 
 Currently used to setup an initial harvest of Zenodo metadata.
 
+Run `uv sync` to recreate the needed virtual env.  
+
 ## Exploratory modules  
 
 ### Zenodo JSON Dump Structural Inference
