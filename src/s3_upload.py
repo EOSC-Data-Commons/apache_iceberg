@@ -1,12 +1,15 @@
+import hashlib
+import logging
+import os
 import threading
-from functools import cache
+import time
+
 import boto3
+import requests
 from boto3.session import Session
 from botocore.config import Config
-import os
-import requests
-import hashlib
-import time
+
+logger = logging.getLogger(__name__)
 
 
 class UploadStats:
@@ -32,7 +35,7 @@ class UploadStats:
             self.uploaded += 1
             n = self.uploaded
         if n % 10_000 == 0:
-            print(f"{n} files uploaded")
+            logger.info("%d files uploaded", n)
 
     def fail(self, key, exc):
         """Log an error and what record it occured on"""
@@ -53,11 +56,11 @@ class UploadStats:
                     str(exc).split()
                 )  # collapse newlines so each error is one line
                 f.write(f"{key} - {msg}\n")
-        print(f"wrote {len(errors)} errors to {file}")
+        logger.info("wrote %d errors to %s", len(errors), file)
 
 
 def connect_to_s3(access_key: str, secret_key: str, endpoint: str) -> boto3.client:
-    """Connect to S3 with a singleton per credentials"""
+    """Connect to S3, return a client."""
     session = Session()
     return session.client(
         service_name="s3",
@@ -115,7 +118,7 @@ def download_resumable(
             ) as r:
                 r.raise_for_status()
                 if have and r.status_code != 206:
-                    print("server ignored Range; restarting from zero")
+                    logger.warning("server ignored Range; restarting from zero")
                     have = 0
                 with open(path, "ab" if have else "wb") as f:
                     # raw stream, no decoding: the file is already a .gz and must stay byte-identical
@@ -123,12 +126,15 @@ def download_resumable(
                         f.write(block)
                         have += len(block)
                         if have % (256 * 1024 * 1024) < chunk:
-                            print(f"{have / 1e9:.2f} / {total / 1e9:.2f} GB")
+                            logger.info("%.2f / %.2f GB", have / 1e9, total / 1e9)
         except (requests.exceptions.RequestException, OSError) as e:
             attempt += 1
             now = os.path.getsize(path) if os.path.exists(path) else 0
-            print(
-                f"interrupted at {now / 1e6:.0f} MB (retry {attempt}): {type(e).__name__}"
+            logger.warning(
+                "interrupted at %.0f MB (retry %d): %s",
+                now / 1e6,
+                attempt,
+                type(e).__name__,
             )
             time.sleep(min(60, 2 ** min(attempt, 6)))
             continue
