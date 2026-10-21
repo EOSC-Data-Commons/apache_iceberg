@@ -59,7 +59,12 @@ class UploadStats:
         logger.info("wrote %d errors to %s", len(errors), file)
 
 
-def connect_to_s3(access_key: str, secret_key: str, endpoint: str) -> boto3.client:
+def connect_to_s3(
+    access_key: str,
+    secret_key: str,
+    endpoint: str,
+    max_pool_connections: int = 10,
+) -> boto3.client:
     """Connect to S3, return a client."""
     session = Session()
     return session.client(
@@ -72,6 +77,7 @@ def connect_to_s3(access_key: str, secret_key: str, endpoint: str) -> boto3.clie
         config=Config(
             request_checksum_calculation="when_required",
             response_checksum_validation="when_required",
+            max_pool_connections=max_pool_connections,
         ),
     )
 

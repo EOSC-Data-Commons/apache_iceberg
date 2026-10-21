@@ -99,7 +99,7 @@ def main(bucket: str, local_file: str, cleanup_local_dump: str):
 
     logger.debug("Endpoint: %s, prefix: %s, workers: %d", S3_ENDPOINT, PREFIX, WORKERS)
 
-    s3_client = connect_to_s3(ACCESS_KEY, SECRET_KEY, S3_ENDPOINT)
+    s3_client = connect_to_s3(ACCESS_KEY, SECRET_KEY, S3_ENDPOINT, max_pool_connections=WORKERS)
 
     # Create bucket if it doesn't already exist
 
