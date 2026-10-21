@@ -8,9 +8,21 @@ authors = [
 ]
 requires-python = ">=3.10"
 dependencies = [
+    "boto3>=1.43.115",
+    "botocore>=1.43.115",
+    "dotenv>=0.9.9",
     "jq>=1.12.0",
+    "requests>=2.34.2",
 ]
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.marimo.runtime]
+pythonpath = ["src"]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.17.1",
+]
