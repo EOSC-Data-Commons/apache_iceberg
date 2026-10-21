@@ -4,7 +4,7 @@ Currently used to setup an initial harvest of Zenodo metadata.
 
 ## Exploratory modules  
 
-### Zenodo JSON Analysis module
+### Zenodo JSON Dump Structural Inference
 More info in the [module's README](analysis/README.md).
 
 ## Scripts  
