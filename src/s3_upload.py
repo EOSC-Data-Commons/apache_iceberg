@@ -73,9 +73,33 @@ def connect_to_s3(access_key: str, secret_key: str, endpoint: str) -> boto3.clie
     )
 
 
-def download_resumable(url, path, total, headers, chunk=4 * 1024 * 1024):
-    """
-    Continue from specific byte-number if error occurs
+def download_resumable(
+    url: str,
+    path: str,
+    total: int,
+    headers: dict[str, str],
+    chunk: int = 4 * 1024 * 1024,
+) -> None:
+    """Download a file to disk, resuming after connection errors.
+
+    Streams ``url`` into ``path``. If the connection drops or a request fails,
+    waits with exponential backoff (up to 60 s) and continues from the bytes
+    already on disk using an HTTP ``Range`` request.
+
+    If ``path`` already holds ``total`` bytes or more, returns immediately.
+
+    Args:
+        url (str): Address of the file to download.
+        path (str): Local file path; created if missing, appended to if it
+            already exists from an earlier partial download.
+        total (int): Expected final size in bytes (e.g. the ``size`` field from
+            the Zenodo exporter API). The loop ends once the file reaches this size.
+        headers (dict[str, str]): Request headers. A ``Range`` header is added automatically on
+            resume and must not be included here.
+        chunk (int): Read size in bytes per iteration. Defaults to 4 MiB.
+
+    Returns:
+        None
     """
     attempt = 0
     while True:
