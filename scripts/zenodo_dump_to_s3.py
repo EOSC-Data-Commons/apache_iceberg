@@ -12,6 +12,7 @@
 
 
 import argparse
+import logging
 import os
 from dotenv import load_dotenv
 import tarfile
@@ -23,6 +24,8 @@ from datetime import datetime
 
 from s3_upload import UploadStats, connect_to_s3, download_resumable, md5_of, upload
 
+logger = logging.getLogger(__name__)
+
 # Setup secrets, target bucket, local file to download dump, number of workers
 
 load_dotenv("../.env", override=True)
@@ -30,6 +33,22 @@ load_dotenv("../.env", override=True)
 ACCESS_KEY = os.getenv("S3_ACCESS_KEY")
 SECRET_KEY = os.getenv("S3_SECRET_KEY")
 S3_ENDPOINT = os.getenv("S3_ENDPOINT")
+
+
+def setup_logging() -> None:
+    """
+    Log messages from this project at INFO level and above, to the console.
+ 
+    HTTP and AWS client libraries are kept at WARNING so their messages don't
+    drown out our own.
+    """
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)-7s [%(threadName)s] %(name)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+    for noisy in ("boto3", "botocore", "s3transfer", "urllib3"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
 
 
 def parse_args() -> argparse.Namespace:
@@ -56,7 +75,13 @@ def parse_args() -> argparse.Namespace:
 
 
 def main(bucket: str, local_file: str, cleanup_local_dump: str):
-    print("Script " + __file__ + " started.")
+    logger.info("Script %s started.", __file__)
+    logger.debug(
+        "Arguments: bucket=%s, local_file=%s, cleanup_local_dump=%s",
+        bucket,
+        local_file,
+        cleanup_local_dump,
+    )
 
     BUCKET = bucket
     PREFIX = "zenodo_dump/"
@@ -72,18 +97,21 @@ def main(bucket: str, local_file: str, cleanup_local_dump: str):
         "User-Agent": f"zenodo-iceberg-loader(v0.1) / {os.environ['REQUESTER_EMAIL']}",
     }
 
+    logger.debug("Endpoint: %s, prefix: %s, workers: %d", S3_ENDPOINT, PREFIX, WORKERS)
+
     s3_client = connect_to_s3(ACCESS_KEY, SECRET_KEY, S3_ENDPOINT)
 
     # Create bucket if it doesn't already exist
 
     try:
         s3_client.head_bucket(Bucket=BUCKET)
-        print(f"Bucket {BUCKET} already exists.")
+        logger.info("Bucket %s already exists.", BUCKET)
     except ClientError as e:
         if e.response["Error"]["Code"] in ("404", "NoSuchBucket"):
             s3_client.create_bucket(Bucket=BUCKET)
-            print(f"Bucket {BUCKET} created.")
+            logger.info("Bucket %s created.", BUCKET)
         else:
+            logger.error("Could not access bucket %s: %s", BUCKET, e)
             raise
 
     # Zenodo dump ---
@@ -94,6 +122,7 @@ def main(bucket: str, local_file: str, cleanup_local_dump: str):
 
     # The JSON version of full metadata dump
     versions = resp.json()["records-json.tar.gz"]
+    
     newest = max(versions, key=lambda v: datetime.fromisoformat(v["created"]))
 
     zenodo_metadata_url = newest["links"]["self"]  # URL to download the dump
@@ -103,32 +132,38 @@ def main(bucket: str, local_file: str, cleanup_local_dump: str):
     EXPECTED_MD5 = newest["checksum"].removeprefix("md5:")
     EXPECTED_SIZE = int(newest["size"])
 
-    print("Latest metadata dump: ")
-    print(zenodo_metadata_url, zenodo_metadata_date)
+    logger.info("Latest metadata dump: %s (created %s)", zenodo_metadata_url, zenodo_metadata_date)
+    logger.debug("Expected size: %d bytes, expected md5: %s", EXPECTED_SIZE, EXPECTED_MD5)
 
     # Download file locally
     # Lengthy!
+    logger.info("Downloading dump to %s", LOCAL_FILE)
     download_resumable(zenodo_metadata_url, LOCAL_FILE, EXPECTED_SIZE, HEADERS)
+    logger.debug("Download finished, computing md5 of %s", LOCAL_FILE)
     actual_md5 = md5_of(LOCAL_FILE)
 
     # Checksum matches expected?
     # if corrupt file: remove it so the next run starts clean
     if actual_md5 != EXPECTED_MD5:
+        logger.error(
+            "Checksum mismatch: %s != %s. Removing %s", actual_md5, EXPECTED_MD5, LOCAL_FILE
+        )
         os.remove(LOCAL_FILE)
         raise RuntimeError(f"checksum mismatch: {actual_md5} != {EXPECTED_MD5}")
-    print("Download complete and verified.")
+    logger.info("Download complete and verified.")
 
     # Setup threading pool to upload to s3 in parallel
 
     slots = threading.BoundedSemaphore(WORKERS * 4)
     stats = UploadStats()
 
-    print("Starting upload to S3.")
+    logger.info("Starting upload to S3.")
 
     with ThreadPoolExecutor(WORKERS) as pool:
         with tarfile.open(LOCAL_FILE, mode="r|gz") as tar:
             for member in tar:
                 if not member.isfile():
+                    logger.debug("Skipping non-file archive member: %s", member.name)
                     continue
                 data = tar.extractfile(member).read()
                 slots.acquire()
@@ -138,9 +173,10 @@ def main(bucket: str, local_file: str, cleanup_local_dump: str):
                 # Testing - stop at 20000 files
                 current = stats.uploaded
                 if current >= 20000:
+                    logger.warning("Test limit reached (20000 uploads), stopping early.")
                     break
 
-    print(f"done: {stats.uploaded} uploaded, {len(stats.errors)} failed")
+    logger.info("Done: %d uploaded, %d failed", stats.uploaded, len(stats.errors))
 
     # Write down any errors and the files they occurred at in a log
     log_name = BUCKET + "_errors.log"
@@ -150,11 +186,12 @@ def main(bucket: str, local_file: str, cleanup_local_dump: str):
     # Optionally: if indicated, delete the local dump file to free up space
     if cleanup_local_dump == "yes":
         os.remove(local_file)
-        print(f"Deleted {local_file}.")
+        logger.info("Deleted %s.", local_file)
 
-    print("Script " + __file__ + " complete.")
+    logger.info("Script %s complete.", __file__)
 
 
 if __name__ == "__main__":
+    setup_logging()
     args = parse_args()
     main(args.bucket, args.local_file, args.cleanup_local_dump)
