@@ -181,13 +181,6 @@ def main(bucket: str, local_file: str, cleanup_local_dump: str):
                 pool.submit(
                     upload, s3_client, BUCKET, PREFIX + member.name, data, stats, slots
                 )
-                # Testing - stop at 20000 files
-                current = stats.uploaded
-                if current >= 20000:
-                    logger.warning(
-                        "Test limit reached (20000 uploads), stopping early."
-                    )
-                    break
 
     logger.info("Done: %d uploaded, %d failed", stats.uploaded, len(stats.errors))
 
