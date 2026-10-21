@@ -38,7 +38,7 @@ S3_ENDPOINT = os.getenv("S3_ENDPOINT")
 def setup_logging() -> None:
     """
     Log messages from this project at INFO level and above, to the console.
- 
+
     HTTP and AWS client libraries are kept at WARNING so their messages don't
     drown out our own.
     """
@@ -99,7 +99,9 @@ def main(bucket: str, local_file: str, cleanup_local_dump: str):
 
     logger.debug("Endpoint: %s, prefix: %s, workers: %d", S3_ENDPOINT, PREFIX, WORKERS)
 
-    s3_client = connect_to_s3(ACCESS_KEY, SECRET_KEY, S3_ENDPOINT, max_pool_connections=WORKERS)
+    s3_client = connect_to_s3(
+        ACCESS_KEY, SECRET_KEY, S3_ENDPOINT, max_pool_connections=WORKERS
+    )
 
     # Create bucket if it doesn't already exist
 
@@ -122,7 +124,7 @@ def main(bucket: str, local_file: str, cleanup_local_dump: str):
 
     # The JSON version of full metadata dump
     versions = resp.json()["records-json.tar.gz"]
-    
+
     newest = max(versions, key=lambda v: datetime.fromisoformat(v["created"]))
 
     zenodo_metadata_url = newest["links"]["self"]  # URL to download the dump
@@ -132,8 +134,14 @@ def main(bucket: str, local_file: str, cleanup_local_dump: str):
     EXPECTED_MD5 = newest["checksum"].removeprefix("md5:")
     EXPECTED_SIZE = int(newest["size"])
 
-    logger.info("Latest metadata dump: %s (created %s)", zenodo_metadata_url, zenodo_metadata_date)
-    logger.debug("Expected size: %d bytes, expected md5: %s", EXPECTED_SIZE, EXPECTED_MD5)
+    logger.info(
+        "Latest metadata dump: %s (created %s)",
+        zenodo_metadata_url,
+        zenodo_metadata_date,
+    )
+    logger.debug(
+        "Expected size: %d bytes, expected md5: %s", EXPECTED_SIZE, EXPECTED_MD5
+    )
 
     # Download file locally
     # Lengthy!
@@ -146,7 +154,10 @@ def main(bucket: str, local_file: str, cleanup_local_dump: str):
     # if corrupt file: remove it so the next run starts clean
     if actual_md5 != EXPECTED_MD5:
         logger.error(
-            "Checksum mismatch: %s != %s. Removing %s", actual_md5, EXPECTED_MD5, LOCAL_FILE
+            "Checksum mismatch: %s != %s. Removing %s",
+            actual_md5,
+            EXPECTED_MD5,
+            LOCAL_FILE,
         )
         os.remove(LOCAL_FILE)
         raise RuntimeError(f"checksum mismatch: {actual_md5} != {EXPECTED_MD5}")
@@ -173,7 +184,9 @@ def main(bucket: str, local_file: str, cleanup_local_dump: str):
                 # Testing - stop at 20000 files
                 current = stats.uploaded
                 if current >= 20000:
-                    logger.warning("Test limit reached (20000 uploads), stopping early.")
+                    logger.warning(
+                        "Test limit reached (20000 uploads), stopping early."
+                    )
                     break
 
     logger.info("Done: %d uploaded, %d failed", stats.uploaded, len(stats.errors))

@@ -24,6 +24,7 @@ class UploadStats:
         errors (list[tuple[str, Exception]]): ``(key, exception)`` pairs for
             record id, error message for every failed upload.
     """
+
     def __init__(self):
         self.lock = threading.Lock()
         self.uploaded = 0
@@ -103,7 +104,7 @@ def download_resumable(
             already exists from an earlier partial download.
         total (int): Expected final size in bytes (e.g. the ``size`` field from
             the Zenodo exporter API). The loop ends once the file reaches this size.
-        headers (dict[str, str]): Request headers. A ``Range`` header is added automatically on
+        headers (dict): Request headers. A ``Range`` header is added automatically on
             resume and must not be included here.
         chunk (int): Read size in bytes per iteration. Defaults to 4 MiB.
 
@@ -149,7 +150,8 @@ def download_resumable(
 
 def md5_of(path):
     """
-    Get md5 hash of file at path.
+    Get md5 hash of file at ``path``.
+    Returns: str
     """
     h = hashlib.md5()
     with open(path, "rb") as f:
