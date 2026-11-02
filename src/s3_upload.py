@@ -194,3 +194,13 @@ def upload(
         stats.fail(key, e)
     finally:
         slots.release()
+
+def iter_s3_keys(s3, bucket, prefix, suffix=".json", start_after=""):
+    """Lazily yield object keys under bucket/prefix, in alphabetical order."""
+    kwargs = {"Bucket": bucket, "Prefix": prefix}
+    if start_after:
+        kwargs["StartAfter"] = start_after
+    for page in s3.get_paginator("list_objects_v2").paginate(**kwargs):
+        for obj in page.get("Contents", []):
+            if obj["Key"].endswith(suffix):
+                yield obj["Key"]
