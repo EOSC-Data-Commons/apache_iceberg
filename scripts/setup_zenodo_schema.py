@@ -172,6 +172,14 @@ def _(TABLE_IDENTIFIER_T1, catalog, schema_T1):
 
 
 @app.cell
+def _(TABLE_IDENTIFIER_T2, catalog):
+    # Always start from stratch for second table!
+    if catalog.table_exists(TABLE_IDENTIFIER_T2):
+        catalog.purge_table(TABLE_IDENTIFIER_T2)
+    return
+
+
+@app.cell
 def _(TABLE_IDENTIFIER_T2, catalog, schema_T2):
     iceberg_table_2 = catalog.create_table_if_not_exists(TABLE_IDENTIFIER_T2, schema=schema_T2)
     return
@@ -201,8 +209,9 @@ def _(mo):
 @app.cell
 def _():
     from s3_upload import connect_to_s3, iter_s3_keys
+    from json_manipulation.json_transform import transform_json_zenodo_to_datacite
 
-    return connect_to_s3, iter_s3_keys
+    return connect_to_s3, iter_s3_keys, transform_json_zenodo_to_datacite
 
 
 @app.cell
@@ -241,7 +250,7 @@ def _(SOURCE_BUCKET, date, json, s3):
             "file": key,  # full key, used for resume
             "id": str(d["id"]),
             "source": "Zenodo",
-            "resource_type": (d.get("metadata", {}).get("resource_type") or {}).get("type"),
+            "resource_type": (d.get("metadata", {}).get("resource_type") or {}).get("id"),
             "created": to_date(d.get("created")),
             "updated": to_date(d.get("updated")),
         }
@@ -330,6 +339,120 @@ def _(TABLE_IDENTIFIER_T1, catalog, upload_total):
 @app.cell
 def _(table_T1_test):
     print(table_T1_test.scan(selected_fields=("file",)).to_arrow())
+    return
+
+
+@app.cell
+def _(table_T1_test):
+    print(table_T1_test.scan(limit = 10).to_arrow())
+    return
+
+
+@app.cell
+def _(TABLE_IDENTIFIER_T1, catalog):
+    counts_T1 = catalog.load_table(TABLE_IDENTIFIER_T1).scan(
+        selected_fields=("resource_type",)
+    ).to_arrow()
+
+    resource_type_counts = (
+        counts_T1.group_by("resource_type")
+        .aggregate([([], "count_all")])
+        .sort_by([("count_all", "descending")])
+    )
+
+    for row in resource_type_counts.to_pylist():
+        print(row)
+    return
+
+
+@app.cell
+def _(TABLE_IDENTIFIER_T1, catalog):
+    # 2nd table
+    # Filter 1st table rows to only dataset
+
+    src_T1 = catalog.load_table(TABLE_IDENTIFIER_T1)
+    t1_records = src_T1.scan(
+        row_filter="resource_type = 'dataset'",
+        selected_fields=("file", "id", "source", "resource_type", "created", "updated"),
+    ).to_arrow()
+
+    dataset_files = sorted(t1_records["file"].to_pylist())   # sorted, so progress is orderly
+    print(f"{len(dataset_files):,} dataset records to copy")
+    return (dataset_files,)
+
+
+@app.cell
+def _(SOURCE_BUCKET, json, s3, slim_row, transform_json_zenodo_to_datacite):
+    def full_row(key):
+        raw_text = s3.get_object(Bucket=SOURCE_BUCKET, Key=key)["Body"].read().decode("utf-8")
+        base = slim_row(key)   # reuses Table 1's parsing, so the columns match exactly
+        if base is None:
+            return None
+        base["raw_json"] = raw_text   # exact file contents
+        base["datacite_json"] = json.dumps(
+            transform_json_zenodo_to_datacite(json.loads(raw_text)), ensure_ascii=False
+        )
+        base["additional_metadata_json"] = None   # left empty
+        return base
+
+    return (full_row,)
+
+
+@app.cell
+def _(
+    TABLE_IDENTIFIER_T2,
+    ThreadPoolExecutor,
+    catalog,
+    dataset_files,
+    full_row,
+    pa,
+    schema_T2,
+    time,
+):
+    T2_SLICE = 5_000   # smaller than T1, rows are much bigger now
+
+    def append_with_retry(table, arrow_tbl, attempts=4):
+        before = len(table.metadata.snapshots)
+        for i in range(attempts):
+            try:
+                table.append(arrow_tbl)
+                return
+            except Exception as e:
+                if i == attempts - 1:
+                    raise
+                print(f"append failed ({e!r}), retrying in {2 ** i}s")
+                time.sleep(2 ** i)
+                table.refresh()
+                if len(table.metadata.snapshots) > before:
+                    print("commit had actually landed, not retrying")
+                    return
+
+
+    table_T2 = catalog.load_table(TABLE_IDENTIFIER_T2)
+
+    copied2 = failed2 = 0
+    with ThreadPoolExecutor(max_workers=16) as ex2:
+        for i in range(0, len(dataset_files), T2_SLICE):
+            batch2 = dataset_files[i:i + T2_SLICE]
+            results2 = list(ex2.map(full_row, batch2))
+            rows2 = [r for r in results2 if r is not None]
+            failed2 += len(results2) - len(rows2)
+            if rows2:
+                append_with_retry(table_T2, pa.Table.from_pylist(rows2, schema=schema_T2.as_arrow()))
+            copied2 += len(rows2)
+            print(f"Committed {copied2:,} / {len(dataset_files):,}")
+
+    upload_total_T2 = copied2
+    return failed2, upload_total_T2
+
+
+@app.cell
+def _(TABLE_IDENTIFIER_T2, catalog, dataset_files, failed2, upload_total_T2):
+    upload_total_T2  # run after the fill
+
+    verify_T2 = catalog.load_table(TABLE_IDENTIFIER_T2)
+    n = verify_T2.scan(selected_fields=("file",)).to_arrow().num_rows
+    print(n, "rows in T2;", len(dataset_files), "dataset records in T1;", failed2, "skipped")
     return
 
 
