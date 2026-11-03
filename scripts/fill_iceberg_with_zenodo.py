@@ -123,18 +123,6 @@ def fill_t1(catalog, s3, identifier, bucket, prefix, slice_size, workers):
     return total
 
 
-def log_resource_type_counts(catalog, identifier):
-    t = catalog.load_table(identifier).scan(selected_fields=("resource_type",)).to_arrow()
-    counts = (
-        t.group_by("resource_type")
-        .aggregate([([], "count_all")])
-        .sort_by([("count_all", "descending")])
-    )
-    logger.info("T1 resource types:")
-    for row in counts.to_pylist():
-        logger.info("  %-30s %s", row["resource_type"], f"{row['count_all']:,}")
-
-
 # --------------------------------------------------------------------------
 # Table 2
 # --------------------------------------------------------------------------
@@ -182,15 +170,10 @@ def fill_t2(catalog, s3, identifier, bucket, dataset_files, slice_size, workers)
             logger.info("T2: committed %s / %s", f"{copied:,}", f"{len(dataset_files):,}")
 
     n = catalog.load_table(identifier).scan(selected_fields=("file",)).to_arrow().num_rows
-    logger.info("T2 done: %s rows in table; %s dataset records in T1; %s skipped", f"{n:,}", f"{len(dataset_files):,}", f"{failed:,}")
+    logger.info("T2 done: %s rows in table; %s dataset records in table aggregator_records; %s skipped", f"{n:,}", f"{len(dataset_files):,}", f"{failed:,}")
     if n != copied:
         logger.warning("T2 row count (%s) differs from rows uploaded this run (%s)", n, copied)
     return copied, failed
-
-
-# --------------------------------------------------------------------------
-# Main
-# --------------------------------------------------------------------------
 
 def main():
     setup_logging()
@@ -210,7 +193,7 @@ def main():
     logger.info("Source: s3://%s/%s", args.bucket, args.prefix)
     catalog.create_namespace_if_not_exists(args.namespace)
 
-    # Table 1: all records
+    # Table 1: aggregator_records -- all records
     recreate_table(catalog, t1_id, SCHEMA_AGGREGATOR_RECORDS)
     fill_t1(
         catalog, s3, t1_id,
@@ -219,9 +202,8 @@ def main():
         slice_size=args.t1_slice,
         workers=args.workers,
     )
-    log_resource_type_counts(catalog, t1_id)
 
-    # Table 2: datasets only, with full JSON
+    # Table 2: records_to_harvest -- datasets only, with full JSON
     recreate_table(catalog, t2_id, SCHEMA_RECORDS_TO_HARVEST)
     dataset_files = select_dataset_files(catalog, t1_id)
     fill_t2(
