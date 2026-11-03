@@ -22,8 +22,6 @@ os.environ.setdefault("AWS_RESPONSE_CHECKSUM_VALIDATION", "when_required")
 import argparse
 import json
 import logging
-import sys
-import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from itertools import islice
@@ -33,7 +31,8 @@ from pyiceberg.catalog import load_catalog
 
 from s3_upload import connect_to_s3, iter_s3_keys
 from json_manipulation.json_transform import transform_json_zenodo_to_datacite
-from apache_iceberg.zenodo_from_s3 import SCHEMA_AGGREGATOR_RECORDS, SCHEMA_RECORDS_TO_HARVEST
+from apache_iceberg.iceberg_schemas import SCHEMA_AGGREGATOR_RECORDS, SCHEMA_RECORDS_TO_HARVEST
+from apache_iceberg.zenodo_from_s3 import append_with_retry
 
 logger = logging.getLogger(__name__)
 # Setup secrets, target bucket, local file to download dump, number of workers
@@ -88,27 +87,6 @@ def recreate_table(catalog, identifier, schema):
     if catalog.table_exists(identifier):
         catalog.purge_table(identifier)
     return catalog.create_table(identifier, schema=schema)
-
-
-def append_with_retry(table, arrow_tbl, attempts=4):
-    """Append, retrying on dropped connections. A commit is a POST, so
-    pyiceberg's own retries don't cover it. Checks whether a 'failed' commit
-    actually landed before retrying, to avoid appending twice."""
-    before = len(table.metadata.snapshots)
-    for i in range(attempts):
-        try:
-            table.append(arrow_tbl)
-            return
-        except Exception as e:
-            if i == attempts - 1:
-                raise
-            logger.warning("append failed (%r), retrying in %ds", e, 2 ** i)
-            time.sleep(2 ** i)
-            table.refresh()
-            if len(table.metadata.snapshots) > before:
-                logger.warning("commit had actually landed, not retrying")
-                return
-
 
 # --------------------------------------------------------------------------
 # Row building

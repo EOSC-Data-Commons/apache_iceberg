@@ -1,29 +1,28 @@
-from pyiceberg.schema import Schema
-from pyiceberg.types import DateType, NestedField, StringType
+import logging
+import time
 
-# Schemas for Iceberg tables
+logger = logging.getLogger(__name__)
 
-# Table 1 - all records
-SCHEMA_AGGREGATOR_RECORDS = Schema(
-    NestedField(field_id=1, name="file", field_type=StringType(), required=True),
-    NestedField(field_id=2, name="id", field_type=StringType(), required=True),
-    NestedField(field_id=3, name="source", field_type=StringType(), required=True),
-    NestedField(field_id=4, name="resource_type", field_type=StringType(), required=False),
-    NestedField(field_id=5, name="created", field_type=DateType(), required=False),
-    NestedField(field_id=6, name="updated", field_type=DateType(), required=False),
-)
-
-# Table 2 - records to turn into harvest_events. Contain raw JSON and transformed DataCite JSON
-SCHEMA_RECORDS_TO_HARVEST = Schema(
-    NestedField(field_id=1, name="file", field_type=StringType(), required=True),
-    NestedField(field_id=2, name="id", field_type=StringType(), required=True),
-    NestedField(field_id=3, name="source", field_type=StringType(), required=True),
-    NestedField(field_id=4, name="resource_type", field_type=StringType(), required=False),
-    NestedField(field_id=5, name="created", field_type=DateType(), required=False),
-    NestedField(field_id=6, name="updated", field_type=DateType(), required=False),
-    NestedField(field_id=7, name="raw_json", field_type=StringType(), required=False),
-    # raw -> DataCite JSON
-    NestedField(field_id=8, name="datacite_json", field_type=StringType(), required=False),
-    # raw -> zenodo files schema JSON (left empty for now)
-    NestedField(field_id=9, name="additional_metadata_json", field_type=StringType(), required=False),
-)
+def append_with_retry(table, arrow_tbl, attempts=4):
+    """Append, retrying on dropped connections. A commit is a POST, so
+    pyiceberg's own retries don't cover it. Checks whether a 'failed' commit
+    actually landed before retrying, to avoid appending twice.
+    
+    table: pyiceberg.table Table()
+    arrow_tbl: pa.Table with rows to append and table schema info
+    attemps: int, number of retries to attempt
+    """
+    before = len(table.metadata.snapshots)
+    for i in range(attempts):
+        try:
+            table.append(arrow_tbl)
+            return
+        except Exception as e:
+            if i == attempts - 1:
+                raise
+            logger.warning("append failed (%r), retrying in %ds", e, 2 ** i)
+            time.sleep(2 ** i)
+            table.refresh()
+            if len(table.metadata.snapshots) > before:
+                logger.warning("commit had actually landed, not retrying")
+                return
