@@ -13,7 +13,6 @@
 
 from dotenv import load_dotenv
 
-
 import os
 
 # These variables need to be set so s3 > iceberg requests pass
@@ -31,11 +30,10 @@ from itertools import islice
 
 import pyarrow as pa
 from pyiceberg.catalog import load_catalog
-from pyiceberg.schema import Schema
-from pyiceberg.types import DateType, NestedField, StringType
 
 from s3_upload import connect_to_s3, iter_s3_keys
 from json_manipulation.json_transform import transform_json_zenodo_to_datacite
+from apache_iceberg.zenodo_from_s3 import SCHEMA_AGGREGATOR_RECORDS, SCHEMA_RECORDS_TO_HARVEST
 
 logger = logging.getLogger(__name__)
 # Setup secrets, target bucket, local file to download dump, number of workers
@@ -57,36 +55,6 @@ def setup_logging() -> None:
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
 # --------------------------------------------------------------------------
-# Schemas
-# --------------------------------------------------------------------------
-
-# Table 1 - all records
-SCHEMA_AGGREGATOR_RECORDS = Schema(
-    NestedField(field_id=1, name="file", field_type=StringType(), required=True),
-    NestedField(field_id=2, name="id", field_type=StringType(), required=True),
-    NestedField(field_id=3, name="source", field_type=StringType(), required=True),
-    NestedField(field_id=4, name="resource_type", field_type=StringType(), required=False),
-    NestedField(field_id=5, name="created", field_type=DateType(), required=False),
-    NestedField(field_id=6, name="updated", field_type=DateType(), required=False),
-)
-
-# Table 2 - records to turn into harvest_events
-SCHEMA_RECORDS_TO_HARVEST = Schema(
-    NestedField(field_id=1, name="file", field_type=StringType(), required=True),
-    NestedField(field_id=2, name="id", field_type=StringType(), required=True),
-    NestedField(field_id=3, name="source", field_type=StringType(), required=True),
-    NestedField(field_id=4, name="resource_type", field_type=StringType(), required=False),
-    NestedField(field_id=5, name="created", field_type=DateType(), required=False),
-    NestedField(field_id=6, name="updated", field_type=DateType(), required=False),
-    NestedField(field_id=7, name="raw_json", field_type=StringType(), required=False),
-    # raw -> DataCite JSON
-    NestedField(field_id=8, name="datacite_json", field_type=StringType(), required=False),
-    # raw -> zenodo files schema JSON (left empty for now)
-    NestedField(field_id=9, name="additional_metadata_json", field_type=StringType(), required=False),
-)
-
-
-# --------------------------------------------------------------------------
 # Setup helpers
 # --------------------------------------------------------------------------
 
@@ -101,25 +69,17 @@ def parse_args():
     p.add_argument("--limit", type=int, default=None, help="Only process the first N files (for test runs)")
     return p.parse_args()
 
-
-def require_env(*names):
-    missing = [n for n in names if not os.environ.get(n)]
-    if missing:
-        sys.exit(f"Missing required environment variables: {', '.join(missing)}")
-
-
 def build_catalog():
     props = {
         "type": "rest",
         "uri": os.environ["ICEBERG_REST_CATALOG"],
         "rest.client.max-retries": 5,
         "rest.client.connection-timeout-ms": 30000,
+        "s3.endpoint": os.environ["S3_ENDPOINT"],
         "s3.access-key-id": os.environ["S3_ACCESS_KEY"],
         "s3.secret-access-key": os.environ["S3_SECRET_KEY"],
         "py-io-impl": "pyiceberg.io.fsspec.FsspecFileIO",
     }
-    if os.environ.get("S3_ENDPOINT"):
-        props["s3.endpoint"] = os.environ["S3_ENDPOINT"]
     return load_catalog("remote", **props)
 
 
@@ -287,7 +247,6 @@ def fill_t2(catalog, s3, args, identifier, dataset_files):
 def main():
     setup_logging()
     args = parse_args()
-    require_env("ICEBERG_REST_CATALOG", "S3_ACCESS_KEY", "S3_SECRET_KEY", "S3_ENDPOINT")
 
     t1_id = f"{args.namespace}.aggregator_records"
     t2_id = f"{args.namespace}.records_to_harvest"
