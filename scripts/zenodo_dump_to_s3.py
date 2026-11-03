@@ -27,8 +27,7 @@ from s3_upload import UploadStats, connect_to_s3, download_resumable, md5_of, up
 logger = logging.getLogger(__name__)
 
 # Setup secrets, target bucket, local file to download dump, number of workers
-
-load_dotenv("../.env", override=True)
+load_dotenv(".env", override=True)
 
 ACCESS_KEY = os.getenv("S3_ACCESS_KEY")
 SECRET_KEY = os.getenv("S3_SECRET_KEY")
