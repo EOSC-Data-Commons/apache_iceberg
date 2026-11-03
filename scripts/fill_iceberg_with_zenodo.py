@@ -64,7 +64,6 @@ def parse_args():
     p.add_argument("--t1-slice", type=int, default=10_000, help="Files per commit for table 1 (default: %(default)s)")
     p.add_argument("--t2-slice", type=int, default=5_000, help="Records per commit for table 2 (default: %(default)s)")
     p.add_argument("--workers", type=int, default=32, help="Parallel S3 reads (default: %(default)s)")
-    p.add_argument("--limit", type=int, default=None, help="Only process the first N files (for test runs)")
     return p.parse_args()
 
 def build_catalog():
@@ -89,23 +88,21 @@ def recreate_table(catalog, identifier, schema):
 
 # Table 1 - all records
 
-def fill_t1(catalog, s3, args, identifier):
+def fill_t1(catalog, s3, identifier, bucket, prefix, slice_size, workers):
     arrow_schema = SCHEMA_AGGREGATOR_RECORDS.as_arrow()
     table = catalog.load_table(identifier)
 
     # Turn JSON from S3 into a dict for appending,
     # To be done in parallel with multiple workers
     def build(key):
-        return slim_row_from_dict(key, json.loads(read_object(s3, args.bucket, key)))
+        return slim_row_from_dict(key, json.loads(read_object(s3, bucket, key)))
 
-    keys = iter_s3_keys(s3, args.bucket, args.prefix)
-    if args.limit:
-        keys = islice(keys, args.limit)
+    keys = iter_s3_keys(s3, bucket, prefix)
 
     listed = total = skipped = 0
-    with ThreadPoolExecutor(max_workers=args.workers) as ex:
+    with ThreadPoolExecutor(max_workers=workers) as ex:
         while True:
-            batch = list(islice(keys, args.t1_slice))
+            batch = list(islice(keys, slice_size))
             if not batch:
                 break
             listed += len(batch)
@@ -153,13 +150,13 @@ def select_dataset_files(catalog, identifier):
     return files
 
 
-def fill_t2(catalog, s3, args, identifier, dataset_files):
+def fill_t2(catalog, s3, identifier, bucket, dataset_files, slice_size, workers):
     arrow_schema = SCHEMA_RECORDS_TO_HARVEST.as_arrow()
     table = catalog.load_table(identifier)
 
     def build(key):
         try:
-            raw_text = read_object(s3, args.bucket, key)
+            raw_text = read_object(s3, bucket, key)
             d = json.loads(raw_text)
             row = slim_row_from_dict(key, d)
             if row is None:
@@ -173,9 +170,9 @@ def fill_t2(catalog, s3, args, identifier, dataset_files):
             return None
 
     copied = failed = 0
-    with ThreadPoolExecutor(max_workers=args.workers) as ex:
-        for i in range(0, len(dataset_files), args.t2_slice):
-            batch = dataset_files[i:i + args.t2_slice]
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        for i in range(0, len(dataset_files), slice_size):
+            batch = dataset_files[i:i + slice_size]
             results = list(ex.map(build, batch))
             rows = [r for r in results if r is not None]
             failed += len(results) - len(rows)
@@ -215,13 +212,25 @@ def main():
 
     # Table 1: all records
     recreate_table(catalog, t1_id, SCHEMA_AGGREGATOR_RECORDS)
-    fill_t1(catalog, s3, args, t1_id)
+    fill_t1(
+        catalog, s3, t1_id,
+        bucket=args.bucket,
+        prefix=args.prefix,
+        slice_size=args.t1_slice,
+        workers=args.workers,
+    )
     log_resource_type_counts(catalog, t1_id)
 
     # Table 2: datasets only, with full JSON
     recreate_table(catalog, t2_id, SCHEMA_RECORDS_TO_HARVEST)
     dataset_files = select_dataset_files(catalog, t1_id)
-    fill_t2(catalog, s3, args, t2_id, dataset_files)
+    fill_t2(
+        catalog, s3, t2_id,
+        bucket=args.bucket,
+        dataset_files=dataset_files,
+        slice_size=args.t2_slice,
+        workers=args.workers,
+    )
 
 
 if __name__ == "__main__":
