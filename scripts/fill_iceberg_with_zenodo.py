@@ -150,7 +150,7 @@ def fill_t2(catalog, s3, identifier, bucket, dataset_files, slice_size, workers)
             if row is None:
                 return None
             row["raw_json"] = raw_text  # exact file contents
-            row["datacite_json"] = json.dumps(transform_json_zenodo_to_datacite(d), ensure_ascii=False)
+            row["datacite_json"] = transform_json_zenodo_to_datacite(d)
             row["additional_metadata_json"] = None  # left empty
             return row
         except Exception:
