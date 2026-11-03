@@ -23,7 +23,6 @@ import argparse
 import json
 import logging
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date
 from itertools import islice
 
 import pyarrow as pa
@@ -32,7 +31,7 @@ from pyiceberg.catalog import load_catalog
 from s3_upload import connect_to_s3, iter_s3_keys
 from json_manipulation.json_transform import transform_json_zenodo_to_datacite
 from apache_iceberg.iceberg_schemas import SCHEMA_AGGREGATOR_RECORDS, SCHEMA_RECORDS_TO_HARVEST
-from apache_iceberg.zenodo_from_s3 import append_with_retry
+from apache_iceberg.zenodo_from_s3 import append_with_retry, to_date, read_object, slim_row_from_dict
 
 logger = logging.getLogger(__name__)
 # Setup secrets, target bucket, local file to download dump, number of workers
@@ -50,7 +49,7 @@ def setup_logging() -> None:
         format="%(asctime)s %(levelname)-7s [%(threadName)s] %(name)s: %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
-    for noisy in ("boto3", "botocore", "s3transfer", "urllib3"):
+    for noisy in ("boto3", "botocore", "s3transfer", "urllib3", "pyiceberg.io"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
 # --------------------------------------------------------------------------
@@ -88,42 +87,16 @@ def recreate_table(catalog, identifier, schema):
         catalog.purge_table(identifier)
     return catalog.create_table(identifier, schema=schema)
 
-# --------------------------------------------------------------------------
-# Row building
-# --------------------------------------------------------------------------
-
-def to_date(s):
-    return date.fromisoformat(s[:10]) if s else None
-
-
-def slim_from_dict(key, d):
-    """Table 1 columns from a parsed record, or None if there is no id."""
-    if d.get("id") is None:
-        return None  # id is a required column
-    return {
-        "file": key,  # full S3 key
-        "id": str(d["id"]),
-        "source": "Zenodo",
-        "resource_type": (d.get("metadata", {}).get("resource_type") or {}).get("id"),
-        "created": to_date(d.get("created")),
-        "updated": to_date(d.get("updated")),
-    }
-
-
-def read_object(s3, bucket, key):
-    return s3.get_object(Bucket=bucket, Key=key)["Body"].read().decode("utf-8")
-
-
-# --------------------------------------------------------------------------
-# Table 1
-# --------------------------------------------------------------------------
+# Table 1 - all records
 
 def fill_t1(catalog, s3, args, identifier):
     arrow_schema = SCHEMA_AGGREGATOR_RECORDS.as_arrow()
     table = catalog.load_table(identifier)
 
+    # Turn JSON from S3 into a dict for appending,
+    # To be done in parallel with multiple workers
     def build(key):
-        return slim_from_dict(key, json.loads(read_object(s3, args.bucket, key)))
+        return slim_row_from_dict(key, json.loads(read_object(s3, args.bucket, key)))
 
     keys = iter_s3_keys(s3, args.bucket, args.prefix)
     if args.limit:
@@ -170,7 +143,7 @@ def log_resource_type_counts(catalog, identifier):
 # --------------------------------------------------------------------------
 
 def select_dataset_files(catalog, identifier):
-    src = catalog.load_table(identifier)  # fresh metadata
+    src = catalog.load_table(identifier)  # get latest info, after the initial fill is complete
     t = src.scan(
         row_filter="resource_type = 'dataset'",
         selected_fields=("file",),
@@ -188,7 +161,7 @@ def fill_t2(catalog, s3, args, identifier, dataset_files):
         try:
             raw_text = read_object(s3, args.bucket, key)
             d = json.loads(raw_text)
-            row = slim_from_dict(key, d)
+            row = slim_row_from_dict(key, d)
             if row is None:
                 return None
             row["raw_json"] = raw_text  # exact file contents
@@ -234,6 +207,7 @@ def main():
         os.environ["S3_ACCESS_KEY"],
         os.environ["S3_SECRET_KEY"],
         os.environ["S3_ENDPOINT"],
+        max_pool_connections=args.workers
     )
 
     logger.info("Source: s3://%s/%s", args.bucket, args.prefix)
