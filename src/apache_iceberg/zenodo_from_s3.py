@@ -8,7 +8,7 @@ Two tables are involved (schemas in ``apache_iceberg/iceberg_schemas.py``):
 ``records_to_harvest`` -- the ``resource_type = 'dataset'`` subset, with
   the full record text and its DataCite transform.
 
-This file contains functions for managing the namespaces and tables, 
+This file contains functions for managing and filling the tables, 
 as well as specific function for filling the tables based on s3
 contents, including transformation of raw JSON to datacite JSON for   
 ``records_to_harvest``.
@@ -17,10 +17,8 @@ contents, including transformation of raw JSON to datacite JSON for
 import json
 import logging
 import time
-from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
-from functools import partial
 from itertools import islice
 from typing import NamedTuple
 
@@ -171,10 +169,10 @@ def slim_row_from_dict(key, d):
     }
 
 
-def harvest_row_from_dict(key, d, raw_json):
-    """Build a full ``records_to_harvest`` row from a parsed Zenodo record.
+def harvest_row_from_json(key, raw_json):
+    """Build a full ``records_to_harvest`` row from a raw Zenodo record.
 
-    Extends :func:`slim_row_from_dict` with:
+    Parses ``raw_json`` and extends :func:`slim_row_from_dict` with:
 
     * ``raw_json`` -- the exact text of the JSON file, so the original record
       can always be recovered from the table;
@@ -185,12 +183,13 @@ def harvest_row_from_dict(key, d, raw_json):
 
     Args:
         key (str): S3 object key the record was read from.
-        d (dict): Parsed Zenodo record (must be the parse of ``raw_json``).
-        raw_json (str): The exact text the record was parsed from.
+        raw_json (str): The exact text of the JSON record; parsed for the
+            other columns and stored verbatim in ``raw_json``.
 
     Returns:
         dict | None: A full row, or ``None`` if the record has no ``id``.
     """
+    d = json.loads(raw_json)
     row = slim_row_from_dict(key, d)
     if row is None:
         return None
@@ -198,38 +197,6 @@ def harvest_row_from_dict(key, d, raw_json):
     row["datacite_json"] = transform_json_zenodo_to_datacite(d)
     row["additional_metadata_json"] = None
     return row
-
-
-def aggregator_row_from_s3(s3, bucket, key):
-    """Read one JSON object from S3 and build an ``aggregator_records`` row.
-
-    Args:
-        s3: boto3 S3 client for the source bucket.
-        bucket (str): Source bucket name.
-        key (str): Object key of a single Zenodo record.
-
-    Returns:
-        dict | None: The row, or ``None`` if the record has no ``id``.
-    """
-    return slim_row_from_dict(key, json.loads(read_object(s3, bucket, key)))
-
-
-def harvest_row_from_s3(s3, bucket, key):
-    """Read one JSON object from S3 and build a ``records_to_harvest`` row.
-
-    The file's exact text is kept in ``raw_json``; see
-    :func:`harvest_row_from_dict` for the full row layout.
-
-    Args:
-        s3: boto3 S3 client for the source bucket.
-        bucket (str): Source bucket name.
-        key (str): Object key of a single Zenodo record.
-
-    Returns:
-        dict | None: The row, or ``None`` if the record has no ``id``.
-    """
-    raw_json = read_object(s3, bucket, key)
-    return harvest_row_from_dict(key, json.loads(raw_json), raw_json)
 
 
 class FillStats(NamedTuple):
@@ -256,68 +223,6 @@ def _batched(iterable, size):
     it = iter(iterable)
     while batch := list(islice(it, size)):
         yield batch
-
-
-def _safe(build_row, key):
-    """Call ``build_row(key)``, turning errors into a skipped key.
-
-    A single bad object shouldn't abort a multi-hour fill, so failures are
-    logged (with traceback) and counted as skipped instead of raised.
-    """
-    try:
-        return build_row(key)
-    except Exception:
-        logger.exception("failed to build a row for %s, skipping", key)
-        return None
-
-
-def fill_table_from_keys(
-    table,
-    arrow_schema: pa.Schema,
-    build_row: Callable[[str], dict | None],
-    keys: Iterable[str],
-    slice_size: int,
-    workers: int,
-    label: str,
-) -> FillStats:
-    """Fill ``table`` from ``keys`` in parallel, committing in slices.
-
-    The keys are consumed in batches of ``slice_size``. Each batch is read
-    and parsed by a pool of ``workers`` threads, and the resulting rows are
-    appended in a single commit per batch. Keys whose row fails to build
-    are logged and skipped (see :func:`_safe`).
-
-    Args:
-        table: pyiceberg table to append to.
-        arrow_schema (pyarrow.Schema): Schema of ``table``; row dicts are
-            converted with it.
-        build_row (Callable[[str], dict | None]): Turns one key into a row,
-            e.g. :func:`aggregator_row_from_s3`; ``None`` means "skip".
-        keys (Iterable[str]): S3 keys to process; consumed lazily.
-        slice_size (int): Keys, i.e. rows, per commit.
-        workers (int): Size of the thread pool reading from S3.
-        label (str): Prefix for progress log lines, e.g. the table identifier.
-
-    Returns:
-        FillStats: What was processed, appended and skipped. By construction
-        ``processed == appended + skipped``.
-    """
-    processed = appended = skipped = 0
-    build = partial(_safe, build_row)
-    with ThreadPoolExecutor(max_workers=workers) as ex:
-        for batch in _batched(keys, slice_size):
-            processed += len(batch)
-            results = list(ex.map(build, batch))
-            rows = [r for r in results if r is not None]
-            skipped += len(results) - len(rows)
-            if rows:
-                append_with_retry(table, pa.Table.from_pylist(rows, schema=arrow_schema))
-            appended += len(rows)
-            logger.info(
-                "%s: committed %s rows (%s skipped), last key %s",
-                label, f"{appended:,}", f"{skipped:,}", batch[-1],
-            )
-    return FillStats(processed, appended, skipped)
 
 
 def log_fill_summary(catalog, identifier, stats):
@@ -361,15 +266,31 @@ def fill_aggregator_records(catalog, s3, identifier, bucket, prefix, slice_size,
         FillStats: What was processed, appended and skipped.
     """
     table = catalog.load_table(identifier)
-    stats = fill_table_from_keys(
-        table,
-        SCHEMA_AGGREGATOR_RECORDS.as_arrow(),
-        build_row=partial(aggregator_row_from_s3, s3, bucket),
-        keys=iter_s3_keys(s3, bucket, prefix),
-        slice_size=slice_size,
-        workers=workers,
-        label=identifier,
-    )
+    arrow_schema = SCHEMA_AGGREGATOR_RECORDS.as_arrow()
+
+    def build(key):
+        try:
+            return slim_row_from_dict(key, json.loads(read_object(s3, bucket, key)))
+        except Exception:
+            logger.exception("failed to build a row for %s, skipping", key)
+            return None
+
+    processed = appended = skipped = 0
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        for batch in _batched(iter_s3_keys(s3, bucket, prefix), slice_size):
+            processed += len(batch)
+            results = list(ex.map(build, batch))
+            rows = [r for r in results if r is not None]
+            skipped += len(results) - len(rows)
+            if rows:
+                append_with_retry(table, pa.Table.from_pylist(rows, schema=arrow_schema))
+            appended += len(rows)
+            logger.info(
+                "%s: committed %s rows (%s skipped), last key %s",
+                identifier, f"{appended:,}", f"{skipped:,}", batch[-1],
+            )
+
+    stats = FillStats(processed, appended, skipped)
     log_fill_summary(catalog, identifier, stats)
     return stats
 
@@ -403,7 +324,7 @@ def fill_records_to_harvest(catalog, s3, identifier, bucket, dataset_files, slic
 
     Every key in ``dataset_files`` (see :func:`select_dataset_files`) is read
     from S3 again and stored as a full row: the slim columns, the exact
-    record text and its DataCite transform (see :func:`harvest_row_from_s3`).
+    record text and its DataCite transform (see :func:`harvest_row_from_json`).
     The table must already exist -- :func:`recreate_table` sets it up.
 
     Args:
@@ -420,14 +341,30 @@ def fill_records_to_harvest(catalog, s3, identifier, bucket, dataset_files, slic
         FillStats: What was processed, appended and skipped.
     """
     table = catalog.load_table(identifier)
-    stats = fill_table_from_keys(
-        table,
-        SCHEMA_RECORDS_TO_HARVEST.as_arrow(),
-        build_row=partial(harvest_row_from_s3, s3, bucket),
-        keys=dataset_files,
-        slice_size=slice_size,
-        workers=workers,
-        label=identifier,
-    )
+    arrow_schema = SCHEMA_RECORDS_TO_HARVEST.as_arrow()
+
+    def build(key):
+        try:
+            return harvest_row_from_json(key, read_object(s3, bucket, key))
+        except Exception:
+            logger.exception("failed to build a row for %s, skipping", key)
+            return None
+
+    processed = appended = skipped = 0
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        for batch in _batched(dataset_files, slice_size):
+            processed += len(batch)
+            results = list(ex.map(build, batch))
+            rows = [r for r in results if r is not None]
+            skipped += len(results) - len(rows)
+            if rows:
+                append_with_retry(table, pa.Table.from_pylist(rows, schema=arrow_schema))
+            appended += len(rows)
+            logger.info(
+                "%s: committed %s rows (%s skipped), last key %s",
+                identifier, f"{appended:,}", f"{skipped:,}", batch[-1],
+            )
+
+    stats = FillStats(processed, appended, skipped)
     log_fill_summary(catalog, identifier, stats)
     return stats

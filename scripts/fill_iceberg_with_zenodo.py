@@ -66,8 +66,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--bucket", required=True, help="Source S3 bucket containing the Zenodo JSON files")
     p.add_argument("--namespace", required=True, help="Iceberg namespace where the tables will live")
     p.add_argument("--prefix", default="zenodo_dump", help="Key prefix inside the bucket (default: %(default)s)")
-    p.add_argument("--t1-slice", type=int, default=10_000, help="Files per commit for table 1 (default: %(default)s)")
-    p.add_argument("--t2-slice", type=int, default=5_000, help="Records per commit for table 2 (default: %(default)s)")
+    p.add_argument("--t1-slice", type=int, default=10000, help="Files per commit for table 1 (default: %(default)s)")
+    p.add_argument("--t2-slice", type=int, default=5000, help="Records per commit for table 2 (default: %(default)s)")
     p.add_argument("--workers", type=int, default=32, help="Parallel S3 reads (default: %(default)s)")
     return p.parse_args()
 

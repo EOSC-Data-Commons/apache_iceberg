@@ -35,7 +35,7 @@ class UploadStats:
         with self.lock:
             self.uploaded += 1
             n = self.uploaded
-        if n % 10_000 == 0:
+        if n % 10000 == 0:
             logger.info("%d files uploaded", n)
 
     def fail(self, key, exc):
