@@ -83,6 +83,20 @@ def connect_to_s3(
     )
 
 
+def read_object(s3, bucket, key):
+    """Read one S3 object and return its contents as UTF-8 text.
+
+    Args:
+        s3: boto3 S3 client.
+        bucket (str): Bucket name.
+        key (str): Object key.
+
+    Returns:
+        str: The decoded object contents.
+    """
+    return s3.get_object(Bucket=bucket, Key=key)["Body"].read().decode("utf-8")
+
+
 def download_resumable(
     url: str,
     path: str,
