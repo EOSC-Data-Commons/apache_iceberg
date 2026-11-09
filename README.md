@@ -27,8 +27,18 @@ It goes through the following steps:
 
 Note: Downloading the .tar.gz dump requires about 13GB of space and might take minutes. Uploading the millions of records may take **hours**!
 
-### Define Apache Iceberg tables
-TODO Table definitions, fill tables based on S3 contents
+### Fill Iceberg tables from an S3 bucket of Zenodo records
+A script drops and rebuilds the two Iceberg tables defined in `src/apache_iceberg/iceberg_schemas.py`, creating them in the given `--namespace`: `aggregator_records` (one row for each record) and `records_to_harvest` (only *dataset* records, with the raw and DataCite JSON).
+
+To run the script, execute the following:
+`uv run scripts/fill_iceberg_with_zenodo.py --bucket zenodo20k-2026-10-03 --namespace test_harvest_ice`
+
+It goes through the following steps:
+* connects to the Iceberg REST catalog and the S3 endpoint, with credentials from `.env`
+* rebuilds `aggregator_records` from every `*.json` object under the `--prefix`, committing in slices of `--t1-slice` rows
+* rebuilds `records_to_harvest` from the `resource_type = 'dataset'` records, adding the raw and DataCite JSON
+* records that fail to read or parse are logged and skipped so the run doesn't fail in the middle  
+
 
 ### Use Iceberg records as "harvest_events" in ***Metadata Warehouse***
 TODO  

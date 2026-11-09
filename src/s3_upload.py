@@ -35,7 +35,7 @@ class UploadStats:
         with self.lock:
             self.uploaded += 1
             n = self.uploaded
-        if n % 10_000 == 0:
+        if n % 10000 == 0:
             logger.info("%d files uploaded", n)
 
     def fail(self, key, exc):
@@ -81,6 +81,20 @@ def connect_to_s3(
             max_pool_connections=max_pool_connections,
         ),
     )
+
+
+def read_object(s3, bucket, key):
+    """Read one S3 object and return its contents as UTF-8 text.
+
+    Args:
+        s3: boto3 S3 client.
+        bucket (str): Bucket name.
+        key (str): Object key.
+
+    Returns:
+        str: The decoded object contents.
+    """
+    return s3.get_object(Bucket=bucket, Key=key)["Body"].read().decode("utf-8")
 
 
 def download_resumable(
@@ -194,3 +208,13 @@ def upload(
         stats.fail(key, e)
     finally:
         slots.release()
+
+def iter_s3_keys(s3, bucket, prefix, suffix=".json", start_after=""):
+    """Lazily yield object keys under bucket/prefix, in alphabetical order."""
+    kwargs = {"Bucket": bucket, "Prefix": prefix}
+    if start_after:
+        kwargs["StartAfter"] = start_after
+    for page in s3.get_paginator("list_objects_v2").paginate(**kwargs):
+        for obj in page.get("Contents", []):
+            if obj["Key"].endswith(suffix):
+                yield obj["Key"]
