@@ -29,7 +29,7 @@ from apache_iceberg.iceberg_schemas import (
     SCHEMA_AGGREGATOR_RECORDS,
     SCHEMA_RECORDS_TO_HARVEST,
 )
-from json_manipulation.json_transform import transform_json_zenodo_to_datacite
+from json_manipulation.json_transform import transform_json_zenodo_to_datacite, transform_json_zenodo_to_files_endpoint
 from s3_upload import iter_s3_keys, read_object
 
 logger = logging.getLogger(__name__)
@@ -177,9 +177,7 @@ def harvest_row_from_json(key, raw_json):
     * ``raw_json`` -- the exact text of the JSON file, so the original record
       can always be recovered from the table;
     * ``datacite_json`` -- the record transformed to the DataCite schema
-      (see ``json_manipulation.json_transform``);
-    * ``additional_metadata_json`` -- placeholder for extra file metadata,
-      left ``None`` for now.
+    * ``additional_metadata_json`` -- the record transformed to the /files schema
 
     Args:
         key (str): S3 object key the record was read from.
@@ -195,7 +193,7 @@ def harvest_row_from_json(key, raw_json):
         return None
     row["raw_json"] = raw_json
     row["datacite_json"] = transform_json_zenodo_to_datacite(d)
-    row["additional_metadata_json"] = None
+    row["additional_metadata_json"] = transform_json_zenodo_to_files_endpoint(d)
     return row
 
 

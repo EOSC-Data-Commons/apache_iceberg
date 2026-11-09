@@ -10,6 +10,9 @@ _RESOURCES_FOLDER = _REPO_ROOT / "resources"
 zenodo_datacite_jq_path = _RESOURCES_FOLDER / "zenodo_to_datacite.jq"
 zenodo_datacite_transformer = jq.compile(zenodo_datacite_jq_path.read_text())
 
+zenodo_files_jq_path = _RESOURCES_FOLDER / "zenodo_dump_to_files_endpoint.jq"
+zenodo_files_transformer = jq.compile(zenodo_files_jq_path.read_text())
+
 
 def transform_json_zenodo_to_datacite(zenodo_json: dict) -> str:
     """
@@ -17,4 +20,13 @@ def transform_json_zenodo_to_datacite(zenodo_json: dict) -> str:
     The result is stringified JSON, needs to go thru json.loads before validating against Datacite schema.
     """
     result = zenodo_datacite_transformer.input_value(zenodo_json)
+    return result.text()
+
+def transform_json_zenodo_to_files_endpoint(zenodo_json: dict) -> str:
+    """
+    Transform Zenodo raw JSON to the JSON returned by the /files endpoint.  
+    This is needed for "additional_metadata" in the warehouse, so it needs to be in the same schema.
+    The result is stringified JSON, needs to go thru json.loads before validating against files schema.
+    """
+    result = zenodo_files_transformer.input_value(zenodo_json)
     return result.text()
