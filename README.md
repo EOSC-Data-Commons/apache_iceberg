@@ -36,8 +36,19 @@ To run the script, execute the following:
 It goes through the following steps:
 * connects to the Iceberg REST catalog and the S3 endpoint, with credentials from `.env`
 * rebuilds `aggregator_records` from every `*.json` object under the `--prefix`, committing in slices of `--t1-slice` rows
-* rebuilds `records_to_harvest` from the `resource_type = 'dataset'` records, adding the raw and DataCite JSON
-* records that fail to read or parse are logged and skipped so the run doesn't fail in the middle  
+* rebuilds `records_to_harvest` from the `resource_type = 'dataset'` records, adding the raw JSON and transforming it into DataCite JSON and additional_metadata JSON (used for files)
+* records that fail to read or parse are logged and skipped so the run doesn't fail in the middle
+
+Mandatory arguments:  
+`--bucket` : name of s3 bucket where the dump is stored. The s3 credentials are provided in ENV  
+`--namespace` : Iceberg namespace where the tables will live. Created if nonexistant
+
+Optional arguments:  
+`--prefix` : Folder in the `--bucket`. Default "zenodo_dump"  
+`--t1-slice` : Number of records per commit to table 1, *aggregator records*. Default 10000  
+`--t2-slice` : Number of records per commit to table 2, *records_to_harvest*. Default 5000  
+`--workers` : For working with S3 in parallel. Default 32
+
 
 
 ### Use Iceberg records as "harvest_events" in ***Metadata Warehouse***
