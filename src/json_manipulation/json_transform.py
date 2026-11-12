@@ -1,8 +1,8 @@
 import json
-from jsonschema.validators import validate
-from jsonschema.exceptions import ValidationError
 from pathlib import Path
+
 import jq
+from jsonschema.validators import validate
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _RESOURCES_FOLDER = _REPO_ROOT / "resources"

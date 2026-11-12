@@ -17,6 +17,7 @@ contents, including transformation of raw JSON to datacite JSON for
 import json
 import logging
 import time
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from itertools import islice
@@ -29,7 +30,10 @@ from apache_iceberg.iceberg_schemas import (
     SCHEMA_AGGREGATOR_RECORDS,
     SCHEMA_RECORDS_TO_HARVEST,
 )
-from json_manipulation.json_transform import transform_json_zenodo_to_datacite, transform_json_zenodo_to_files_endpoint
+from json_manipulation.json_transform import (
+    transform_json_zenodo_to_datacite,
+    transform_json_zenodo_to_files_endpoint,
+)
 from s3_upload import iter_s3_keys, read_object
 
 logger = logging.getLogger(__name__)
@@ -212,15 +216,71 @@ class FillStats(NamedTuple):
     skipped: int
 
 
-def _batched(iterable, size):
-    """Yield lists of at most ``size`` items from ``iterable``.
+def _sliced_fill(keys, build_row, catalog, identifier, schema, slice_size, workers):
+    """Engine shared by :func:`fill_aggregator_records` and
+    :func:`fill_records_to_harvest`.
 
-    Works on lazy iterators (unlike slicing), so the S3 listing can be
-    consumed while the fill is running.
+    Builds one row per key with a pool of ``workers`` threads and commits
+    the rows to the table in slices of ``slice_size``. 
+    
+    ``build_row`` must catch errors and return ``None`` for a 
+    key that produced no row, e.g. has a nonsupported format..
+
+    Args:
+        keys (Iterable[str]): S3 keys to process, in commit order.
+        build_row (Callable[[str], dict | None]): Builds a row for a key;
+            a ``None`` result is counted as skipped.
+        catalog: pyiceberg catalog holding the table.
+        identifier (str): Table identifier to fill.
+        schema (pyiceberg.schema.Schema): Schema of the table to fill.
+        slice_size (int): Rows per commit.
+        workers (int): Number of workers, parallel S3 reads.
+
+    Returns:
+        FillStats: What was processed, appended and skipped.
     """
-    it = iter(iterable)
-    while batch := list(islice(it, size)):
-        yield batch
+    table = catalog.load_table(identifier)
+    arrow_schema = schema.as_arrow()
+    processed = appended = skipped = 0
+
+    def commit(rows, last_key):
+        nonlocal appended, skipped
+        good = [r for r in rows if r is not None]
+        skipped += len(rows) - len(good)
+        if good:
+            append_with_retry(table, pa.Table.from_pylist(good, schema=arrow_schema))
+        appended += len(good)
+        logger.info(
+            "%s: committed %s rows (%s skipped), last key %s",
+            identifier, f"{appended:,}", f"{skipped:,}", last_key,
+        )
+
+    # One slice of tasks in flight, at least a couple per worker, so the
+    # pool keeps working while the main thread commits a finished slice.
+    lookahead = max(slice_size, 2 * workers)
+    keys_iter = iter(keys)
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        in_flight = deque(
+            (ex.submit(build_row, key), key) for key in islice(keys_iter, lookahead)
+        )
+        rows, last_key = [], None
+        while in_flight:
+            fut, key = in_flight.popleft()
+            # refill before waiting, so waiting never starves the pool
+            for k in islice(keys_iter, 1):
+                in_flight.append((ex.submit(build_row, k), k))
+            rows.append(fut.result())
+            last_key = key
+            processed += 1
+            if len(rows) >= slice_size:
+                commit(rows, last_key)
+                rows = []
+        if rows:
+            commit(rows, last_key)
+
+    stats = FillStats(processed, appended, skipped)
+    log_fill_summary(catalog, identifier, stats)
+    return stats
 
 
 def log_fill_summary(catalog, identifier, stats):
@@ -263,34 +323,17 @@ def fill_aggregator_records(catalog, s3, identifier, bucket, prefix, slice_size,
     Returns:
         FillStats: What was processed, appended and skipped.
     """
-    table = catalog.load_table(identifier)
-    arrow_schema = SCHEMA_AGGREGATOR_RECORDS.as_arrow()
-
-    def build(key):
+    def build_row(key):
         try:
             return slim_row_from_dict(key, json.loads(read_object(s3, bucket, key)))
         except Exception:
             logger.exception("failed to build a row for %s, skipping", key)
             return None
 
-    processed = appended = skipped = 0
-    with ThreadPoolExecutor(max_workers=workers) as ex:
-        for batch in _batched(iter_s3_keys(s3, bucket, prefix), slice_size):
-            processed += len(batch)
-            results = list(ex.map(build, batch))
-            rows = [r for r in results if r is not None]
-            skipped += len(results) - len(rows)
-            if rows:
-                append_with_retry(table, pa.Table.from_pylist(rows, schema=arrow_schema))
-            appended += len(rows)
-            logger.info(
-                "%s: committed %s rows (%s skipped), last key %s",
-                identifier, f"{appended:,}", f"{skipped:,}", batch[-1],
-            )
-
-    stats = FillStats(processed, appended, skipped)
-    log_fill_summary(catalog, identifier, stats)
-    return stats
+    return _sliced_fill(
+        iter_s3_keys(s3, bucket, prefix), build_row,
+        catalog, identifier, SCHEMA_AGGREGATOR_RECORDS, slice_size, workers,
+    )
 
 
 def select_dataset_files(catalog, identifier):
@@ -338,31 +381,14 @@ def fill_records_to_harvest(catalog, s3, identifier, bucket, dataset_files, slic
     Returns:
         FillStats: What was processed, appended and skipped.
     """
-    table = catalog.load_table(identifier)
-    arrow_schema = SCHEMA_RECORDS_TO_HARVEST.as_arrow()
-
-    def build(key):
+    def build_row(key):
         try:
             return harvest_row_from_json(key, read_object(s3, bucket, key))
         except Exception:
             logger.exception("failed to build a row for %s, skipping", key)
             return None
 
-    processed = appended = skipped = 0
-    with ThreadPoolExecutor(max_workers=workers) as ex:
-        for batch in _batched(dataset_files, slice_size):
-            processed += len(batch)
-            results = list(ex.map(build, batch))
-            rows = [r for r in results if r is not None]
-            skipped += len(results) - len(rows)
-            if rows:
-                append_with_retry(table, pa.Table.from_pylist(rows, schema=arrow_schema))
-            appended += len(rows)
-            logger.info(
-                "%s: committed %s rows (%s skipped), last key %s",
-                identifier, f"{appended:,}", f"{skipped:,}", batch[-1],
-            )
-
-    stats = FillStats(processed, appended, skipped)
-    log_fill_summary(catalog, identifier, stats)
-    return stats
+    return _sliced_fill(
+        dataset_files, build_row,
+        catalog, identifier, SCHEMA_RECORDS_TO_HARVEST, slice_size, workers,
+    )
