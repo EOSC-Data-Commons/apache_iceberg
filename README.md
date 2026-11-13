@@ -15,7 +15,7 @@ More info in the [module's README](analysis/README.md).
 A script fills a S3 bucket with the contents of the latest Zenodo metadata dump.
 
 To run the script, execute the following:  
-`uv run scripts/zenodo_dump_to_s3.py --bucket test_zenodo_dump`  
+`uv run scripts/01_zenodo_dump_to_s3.py --bucket test_zenodo_dump`  
 You can add `--cleanup-local-dump yes` to delete the ~13GB dump that gets downloaded after the script finishes.
 
 It goes through the following steps:
@@ -27,26 +27,47 @@ It goes through the following steps:
 
 Note: Downloading the .tar.gz dump requires about 13GB of space and might take minutes. Uploading the millions of records may take **hours**!
 
-### Fill Iceberg tables from an S3 bucket of Zenodo records
-A script drops and rebuilds the two Iceberg tables defined in `src/apache_iceberg/iceberg_schemas.py`, creating them in the given `--namespace`: `aggregator_records` (one row for each record) and `records_to_harvest` (only *dataset* records, with the raw and DataCite JSON).
+### Fill the aggregator_records table
+A script drops and rebuilds the `aggregator_records` table defined in `src/apache_iceberg/iceberg_schemas.py` in the given `--namespace`: one row for each `*.json` record under the `--prefix`, with id, resource type and dates, so later steps can select which records to harvest.
 
 To run the script, execute the following:
-`uv run scripts/fill_iceberg_with_zenodo.py --bucket zenodo20k-2026-10-03 --namespace test_harvest_ice`
+`uv run scripts/02_fill_iceberg_aggregator_records_zenodo.py --bucket zenodo20k-2026-10-03 --namespace test_harvest_ice`
 
 It goes through the following steps:
 * connects to the Iceberg REST catalog and the S3 endpoint, with credentials from `.env`
-* rebuilds `aggregator_records` from every `*.json` object under the `--prefix`, committing in slices of `--t1-slice` rows
-* rebuilds `records_to_harvest` from the `resource_type = 'dataset'` records, adding the raw JSON and transforming it into DataCite JSON and additional_metadata JSON (used for files)
+* creates the `--namespace` namespace if it doesn't already exist
+* rebuilds `aggregator_records` from every `*.json` object under the `--prefix`, committing in slices of `--slice` rows
 * records that fail to read or parse are logged and skipped so the run doesn't fail in the middle
 
 Mandatory arguments:  
 `--bucket` : name of s3 bucket where the dump is stored. The s3 credentials are provided in ENV  
-`--namespace` : Iceberg namespace where the tables will live. Created if nonexistant
+`--namespace` : Iceberg namespace where the table will live. Created if nonexistant
 
 Optional arguments:  
 `--prefix` : Folder in the `--bucket`. Default "zenodo_dump"  
-`--t1-slice` : Number of records per commit to table 1, *aggregator records*. Default 10000  
-`--t2-slice` : Number of records per commit to table 2, *records_to_harvest*. Default 5000  
+`--slice` : Number of records per commit. Default 10000  
+`--workers` : For working with S3 in parallel. Default 32
+
+### Fill the records_to_harvest table
+A script drops and rebuilds the `records_to_harvest` table defined in `src/apache_iceberg/iceberg_schemas.py` in the given `--namespace`: the `resource_type = 'dataset'` subset, with the raw JSON and its DataCite and additional_metadata transforms.
+
+Script 02 must run first: the S3 keys of the dataset records are selected from the `file` column of the filled `aggregator_records` table.
+
+To run the script, execute the following:
+`uv run scripts/03_fill_iceberg_records_to_harvest_zenodo.py --bucket zenodo20k-2026-10-03 --namespace test_harvest_ice`
+
+It goes through the following steps:
+* connects to the Iceberg REST catalog and the S3 endpoint, with credentials from `.env`
+* selects the dataset records from `aggregator_records` (before dropping anything, so a missing table 1 fails the run instead of emptying table 2)
+* rebuilds `records_to_harvest`, reading each selected record from S3 again and storing it with the raw JSON, the DataCite JSON and the additional_metadata JSON
+* records that fail to read or parse are logged and skipped so the run doesn't fail in the middle
+
+Mandatory arguments:  
+`--bucket` : name of s3 bucket where the dump is stored. The s3 credentials are provided in ENV  
+`--namespace` : Iceberg namespace where the tables live
+
+Optional arguments:  
+`--slice` : Number of records per commit. Default 5000  
 `--workers` : For working with S3 in parallel. Default 32
 
 
