@@ -217,14 +217,14 @@ class FillStats(NamedTuple):
 
 
 def _sliced_fill(keys, build_row, catalog, identifier, schema, slice_size, workers):
-    """Engine shared by :func:`fill_aggregator_records` and
-    :func:`fill_records_to_harvest`.
+    """Helper for creating rows and uploading data to tables in parallel.
 
     Builds one row per key with a pool of ``workers`` threads and commits
     the rows to the table in slices of ``slice_size``. 
     
-    ``build_row`` must catch errors and return ``None`` for a 
-    key that produced no row, e.g. has a nonsupported format..
+    ``build_row`` will be defined in functions for working with specific 
+    tables. It must catch errors and return ``None`` for a key that 
+    produced no row, e.g. has a nonsupported format.
 
     Args:
         keys (Iterable[str]): S3 keys to process, in commit order.
@@ -305,10 +305,10 @@ def log_fill_summary(catalog, identifier, stats):
 # Filling the specific tables
 
 def fill_aggregator_records(catalog, s3, identifier, bucket, prefix, slice_size, workers):
-    """Fill ``aggregator_records`` from every JSON object under a prefix.
+    """Fill ``aggregator_records`` from every JSON in the dump.
 
-    One slim row per ``*.json`` object under ``s3://{bucket}/{prefix}``
-    (see :func:`slim_row_from_dict`); records without an ``id`` are skipped.
+    One row per ``*.json`` object under ``s3://{bucket}/{prefix}``
+    If any records don't have an id, they are skipped and logged.
     The table must already exist -- :func:`recreate_table` sets it up.
 
     Args:
@@ -337,7 +337,7 @@ def fill_aggregator_records(catalog, s3, identifier, bucket, prefix, slice_size,
 
 
 def select_dataset_files(catalog, identifier):
-    """S3 keys of the dataset records found in ``aggregator_records``.
+    """Filter ``aggregator_records`` to only dataset records.
 
     Loads the table fresh (so the scan sees the just-finished fill), scans
     for ``resource_type = 'dataset'`` and returns the sorted values of the
@@ -363,9 +363,10 @@ def select_dataset_files(catalog, identifier):
 def fill_records_to_harvest(catalog, s3, identifier, bucket, dataset_files, slice_size, workers):
     """Fill ``records_to_harvest`` from the selected dataset records.
 
-    Every key in ``dataset_files`` (see :func:`select_dataset_files`) is read
-    from S3 again and stored as a full row: the slim columns, the exact
-    record text and its DataCite transform (see :func:`harvest_row_from_json`).
+    Every key in ``dataset_files`` is read from S3 again and stored 
+    as an expanded row with the original JSON and two transformed 
+    JSON versions.
+    
     The table must already exist -- :func:`recreate_table` sets it up.
 
     Args:
@@ -373,8 +374,8 @@ def fill_records_to_harvest(catalog, s3, identifier, bucket, dataset_files, slic
         s3: boto3 S3 client for the source bucket.
         identifier (str): Table identifier of ``records_to_harvest``.
         bucket (str): Source S3 bucket the keys live in.
-        dataset_files (list[str]): S3 keys to copy, typically the output
-            of :func:`select_dataset_files`.
+        dataset_files (list[str]): S3 keys to copy, should be the 
+            result of `select_dataset_files`.
         slice_size (int): Rows per commit.
         workers (int): Parallel S3 reads.
 
