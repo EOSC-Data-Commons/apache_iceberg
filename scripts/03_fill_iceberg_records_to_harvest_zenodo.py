@@ -1,14 +1,26 @@
-"""Create and fill the records_to_harvest Iceberg table from the dataset records.
+"""Create and fill the records_to_harvest Iceberg table from a subset of aggregator_records.
 
-The ``resource_type = 'dataset'`` records are selected from the
-``aggregator_records`` table (filled by script 02), read from S3 again and
-stored as full rows: the slim columns, the exact record text and its
-DataCite and additional_metadata transforms.
+The aggregator_records is filtered to only include resource_type = 'dataset'. (If needed, this
+can be adjusted in the apache_iceberg.zenodo_from_s3.select_dataset_files() function.)
+For these rows, they are inserted into the new tables, which also includes their full
+raw_JSON, as well as two transformations of this JSON needed to conform to the form
+"harvest_events" in the main metadata warehouse will expect.
+Transformations:
+    datacite_JSON:
+    additional_metadata_JSON:
 
 The table is dropped and rebuilt on every run.
 
-Script 02 must run first -- the S3 keys to copy are the ``file`` column
-of the filled ``aggregator_records`` table in the same --namespace.
+The table "records_to_harvest" is created in the provided --namespace. The files are read
+again from the --bucket since the full JSON info is needed. The bucket should be the same 
+as the one used in script 02!
+The prefix inside bucket is not needed, since it is already stored in the file column of
+the aggregator_records table.
+
+The run can be further customised by specifying the number of --workers to do work in 
+parallel (default 32), and the number of records to be uploaded at a single time 
+(--slice, default 5000. This is smaller than the first table since the rows here are larger).
+
 
 Example:
     uv run python scripts/03_fill_iceberg_records_to_harvest_zenodo.py --bucket zenodo20k-2026-10-03 --namespace test_harvest_ice

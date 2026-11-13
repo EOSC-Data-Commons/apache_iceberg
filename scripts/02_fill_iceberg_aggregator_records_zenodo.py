@@ -1,13 +1,17 @@
 """Create and fill the aggregator_records Iceberg table from an S3 bucket.
 
-One slim row (id, source, resource type and dates) per ``*.json`` object
-under ``s3://{bucket}/{prefix}``, so later steps can select which records
-to harvest -- script 03 fills ``records_to_harvest`` from the dataset
-records selected here.
+This table is used to later filter out a subset of records. Therefore it contains
+less information, mainly ID, resource_type and dates created/updated. The second
+table, records_to_harvest, will include full JSON alongside these columns.
 
 The table is dropped and rebuilt on every run.
 
-The table is created in the provided --namespace.
+The table "aggregator_records" is created in the provided --namespace from a 
+specified --bucket and the --prefix in that bucket (the default prefix is "zenodo_dump").
+
+The run can be further customised by specifying the number of --workers to do work in 
+parallel (default 32), and the number of records to be uploaded at a single time 
+(--slice, default 10000).
 
 Example:
     uv run python scripts/02_fill_iceberg_aggregator_records_zenodo.py --bucket zenodo20k-2026-10-03 --namespace test_harvest_ice
