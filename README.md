@@ -12,7 +12,7 @@ More info in the [module's README](analysis/README.md).
 ## Scripts  
 
 ### Push Zenodo metadata dump to S3
-A script fills a S3 bucket with the contents of the latest Zenodo metadata dump.
+Fills a S3 bucket with the contents of the latest Zenodo metadata dump.
 
 To run the script, execute the following:  
 `uv run scripts/01_zenodo_dump_to_s3.py --bucket test_zenodo_dump`  
@@ -27,8 +27,8 @@ It goes through the following steps:
 
 Note: Downloading the .tar.gz dump requires about 13GB of space and might take minutes. Uploading the millions of records may take **hours**!
 
-### Fill the aggregator_records table
-A script drops and rebuilds the `aggregator_records` table defined in `src/apache_iceberg/iceberg_schemas.py` in the given `--namespace`: one row for each `*.json` record under the `--prefix`, with id, resource type and dates, so later steps can select which records to harvest.
+### Fill the aggregator_records Iceberg table
+Drops and rebuilds the `aggregator_records` table defined in `src/apache_iceberg/iceberg_schemas.py` in the given `--namespace`: one row for each `*.json` record under the `--prefix`, with id, resource type and dates, so later steps can select which records to harvest.
 
 To run the script, execute the following:
 `uv run scripts/02_fill_iceberg_aggregator_records_zenodo.py --bucket zenodo20k-2026-10-03 --namespace test_harvest_ice`
@@ -48,10 +48,11 @@ Optional arguments:
 `--slice` : Number of records per commit. Default 10000  
 `--workers` : For working with S3 in parallel. Default 32
 
-### Fill the records_to_harvest table
-A script drops and rebuilds the `records_to_harvest` table defined in `src/apache_iceberg/iceberg_schemas.py` in the given `--namespace`: the `resource_type = 'dataset'` subset, with the raw JSON and its DataCite and additional_metadata transforms.
-
-Script 02 must run first: the S3 keys of the dataset records are selected from the `file` column of the filled `aggregator_records` table.
+### Fill the records_to_harvest Iceberg  table
+Drops and rebuilds the `records_to_harvest` table defined in `src/apache_iceberg/iceberg_schemas.py` in the given `--namespace`.
+This table is a subset of the *aggregator_records* table, currently only those records with `resource_type = "dataset"`.
+For these records their full raw_JSON is stored, as well as its DataCite and additional_metadata transforms. The JSON
+transformations will be used to create *harvest_events* in the metadata warehouse.
 
 To run the script, execute the following:
 `uv run scripts/03_fill_iceberg_records_to_harvest_zenodo.py --bucket zenodo20k-2026-10-03 --namespace test_harvest_ice`

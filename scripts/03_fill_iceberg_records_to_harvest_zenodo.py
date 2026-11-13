@@ -6,8 +6,8 @@ For these rows, they are inserted into the new tables, which also includes their
 raw_JSON, as well as two transformations of this JSON needed to conform to the form
 "harvest_events" in the main metadata warehouse will expect.
 Transformations:
-    datacite_JSON:
-    additional_metadata_JSON:
+    datacite_JSON: conforms with metadata_warehouse `harvest_events.raw_metadata` when "metadata_format" = "JSON"
+    additional_metadata_JSON: conforms with metadata_warehouse `harvest_events.additional_metadata`
 
 The table is dropped and rebuilt on every run.
 
