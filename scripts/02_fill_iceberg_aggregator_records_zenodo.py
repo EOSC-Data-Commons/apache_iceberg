@@ -1,16 +1,20 @@
-"""Create and fill the Zenodo Iceberg tables from an S3 bucket.
+"""Create and fill the aggregator_records Iceberg table from an S3 bucket.
 
-Table 1 (``aggregator_records``): one row per JSON file in the bucket with id, 
-resource type, dates from the record.
-Table 2 (``records_to_harvest``): subset of only ``resource_type = 'dataset'`` records,
-with the full JSON and its DataCite transform.
+This table is used to later filter out a subset of records. Therefore it contains
+less information, mainly ID, resource_type and dates created/updated. The second
+table, records_to_harvest, will include full JSON alongside these columns.
 
-Both tables are dropped and rebuilt on every run.
+The table is dropped and rebuilt on every run.
 
-The tables are created in the provided --namespace.
+The table "aggregator_records" is created in the provided --namespace from a 
+specified --bucket and the --prefix in that bucket (the default prefix is "zenodo_dump").
+
+The run can be further customised by specifying the number of --workers to do work in 
+parallel (default 32), and the number of records to be uploaded at a single time 
+(--slice, default 10000).
 
 Example:
-    uv run python scripts/fill_iceberg_with_zenodo.py --bucket zenodo20k-2026-10-03 --namespace test_harvest_ice
+    uv run python scripts/02_fill_iceberg_aggregator_records_zenodo.py --bucket zenodo20k-2026-10-03 --namespace test_harvest_ice
 """
 
 import os
@@ -24,16 +28,11 @@ os.environ.setdefault("AWS_RESPONSE_CHECKSUM_VALIDATION", "when_required")
 import argparse
 import logging
 
-from apache_iceberg.iceberg_schemas import (
-    SCHEMA_AGGREGATOR_RECORDS,
-    SCHEMA_RECORDS_TO_HARVEST,
-)
+from apache_iceberg.iceberg_schemas import SCHEMA_AGGREGATOR_RECORDS
 from apache_iceberg.zenodo_from_s3 import (
     build_catalog,
     fill_aggregator_records,
-    fill_records_to_harvest,
     recreate_table,
-    select_dataset_files,
 )
 from s3_upload import connect_to_s3
 
@@ -59,26 +58,24 @@ def setup_logging() -> None:
 
 def parse_args() -> argparse.Namespace:
     """Define command-line arguments.
-    
+
     --bucket and --namespace are mandatory.
     """
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--bucket", required=True, help="Source S3 bucket containing the Zenodo JSON files")
-    p.add_argument("--namespace", required=True, help="Iceberg namespace where the tables will live")
+    p.add_argument("--namespace", required=True, help="Iceberg namespace where the table will live")
     p.add_argument("--prefix", default="zenodo_dump", help="Key prefix inside the bucket (default: %(default)s)")
-    p.add_argument("--t1-slice", type=int, default=10000, help="Files per commit for table 1 (default: %(default)s)")
-    p.add_argument("--t2-slice", type=int, default=5000, help="Records per commit for table 2 (default: %(default)s)")
+    p.add_argument("--slice", type=int, default=10000, help="Rows per commit (default: %(default)s)")
     p.add_argument("--workers", type=int, default=32, help="Parallel S3 reads (default: %(default)s)")
     return p.parse_args()
 
 def main():
-    """Connect to S3 and the catalog, then rebuild and fill both tables."""
+    """Connect to S3 and the catalog, then rebuild and fill the aggregator records table."""
     setup_logging()
     args = parse_args()
 
-    # Full table names, including namespace
-    t1_id = f"{args.namespace}.aggregator_records"
-    t2_id = f"{args.namespace}.records_to_harvest"
+    # Full table name, including namespace
+    identifier = f"{args.namespace}.aggregator_records"
 
     catalog = build_catalog(
         rest_uri=os.environ["ICEBERG_REST_CATALOG"],
@@ -96,23 +93,12 @@ def main():
     logger.info("Source: s3://%s/%s", args.bucket, args.prefix)
     catalog.create_namespace_if_not_exists(args.namespace)
 
-    # Table 1: aggregator_records -- all records
-    recreate_table(catalog, t1_id, SCHEMA_AGGREGATOR_RECORDS)
+    recreate_table(catalog, identifier, SCHEMA_AGGREGATOR_RECORDS)
     fill_aggregator_records(
-        catalog, s3, t1_id,
+        catalog, s3, identifier,
         bucket=args.bucket,
         prefix=args.prefix,
-        slice_size=args.t1_slice,
-        workers=args.workers,
-    )
-
-    # Table 2: records_to_harvest -- datasets only, with full JSON
-    recreate_table(catalog, t2_id, SCHEMA_RECORDS_TO_HARVEST)
-    fill_records_to_harvest(
-        catalog, s3, t2_id,
-        bucket=args.bucket,
-        dataset_files=select_dataset_files(catalog, t1_id),
-        slice_size=args.t2_slice,
+        slice_size=args.slice,
         workers=args.workers,
     )
 
