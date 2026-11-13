@@ -14,7 +14,7 @@ More info in the [module's README](analysis/README.md).
 ### Push Zenodo metadata dump to S3
 Fills a S3 bucket with the contents of the latest Zenodo metadata dump.
 
-To run the script, execute the following:  
+To run the script, execute the following:   
 `uv run scripts/01_zenodo_dump_to_s3.py --bucket test_zenodo_dump`  
 You can add `--cleanup-local-dump yes` to delete the ~13GB dump that gets downloaded after the script finishes.
 
@@ -30,7 +30,7 @@ Note: Downloading the .tar.gz dump requires about 13GB of space and might take m
 ### Fill the aggregator_records Iceberg table
 Drops and rebuilds the `aggregator_records` table defined in `src/apache_iceberg/iceberg_schemas.py` in the given `--namespace`: one row for each `*.json` record under the `--prefix`, with id, resource type and dates, so later steps can select which records to harvest.
 
-To run the script, execute the following:
+To run the script, execute the following:  
 `uv run scripts/02_fill_iceberg_aggregator_records_zenodo.py --bucket zenodo20k-2026-10-03 --namespace test_harvest_ice`
 
 It goes through the following steps:
@@ -54,7 +54,7 @@ This table is a subset of the *aggregator_records* table, currently only those r
 For these records their full raw_JSON is stored, as well as its DataCite and additional_metadata transforms. The JSON
 transformations will be used to create *harvest_events* in the metadata warehouse.
 
-To run the script, execute the following:
+To run the script, execute the following:  
 `uv run scripts/03_fill_iceberg_records_to_harvest_zenodo.py --bucket zenodo20k-2026-10-03 --namespace test_harvest_ice`
 
 It goes through the following steps:
