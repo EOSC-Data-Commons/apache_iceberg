@@ -74,6 +74,8 @@ def main():
     setup_logging()
     args = parse_args()
 
+    logger.info("Start of script %s.", __file__)
+
     # Full table name, including namespace
     identifier = f"{args.namespace}.aggregator_records"
 

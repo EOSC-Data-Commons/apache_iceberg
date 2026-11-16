@@ -83,6 +83,8 @@ def main():
     setup_logging()
     args = parse_args()
 
+    logger.info("Start of script %s.", __file__)
+    
     # Full table names, including namespace
     t1_id = f"{args.namespace}.aggregator_records"
     t2_id = f"{args.namespace}.records_to_harvest"

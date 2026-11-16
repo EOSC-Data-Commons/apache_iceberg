@@ -199,4 +199,7 @@ def main(bucket: str, local_file: str, cleanup_local_dump: str):
 if __name__ == "__main__":
     setup_logging()
     args = parse_args()
+    
+    logger.info("Start of script %s.", __file__)
+
     main(args.bucket, args.local_file, args.cleanup_local_dump)
