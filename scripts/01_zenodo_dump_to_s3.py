@@ -73,20 +73,24 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def main(bucket: str, local_file: str, cleanup_local_dump: str):
-    logger.info("Script %s started.", __file__)
+def main():
+    """Download the newest Zenodo dump and upload it to S3."""
+    setup_logging()
+    args = parse_args()
+
+    logger.info("Start of script %s.", __file__)
     logger.debug(
         "Arguments: bucket=%s, local_file=%s, cleanup_local_dump=%s",
-        bucket,
-        local_file,
-        cleanup_local_dump,
+        args.bucket,
+        args.local_file,
+        args.cleanup_local_dump,
     )
 
-    BUCKET = bucket
+    BUCKET = args.bucket
     PREFIX = "zenodo_dump/"
 
     # We'll first download the file locally, then stream it to S3. Otherwise direct streaming fails
-    LOCAL_FILE = local_file
+    LOCAL_FILE = args.local_file
 
     # Stream to s3 in parallel
     WORKERS = 16
@@ -189,17 +193,12 @@ def main(bucket: str, local_file: str, cleanup_local_dump: str):
     stats.log_errors(log_name)
 
     # Optionally: if indicated, delete the local dump file to free up space
-    if cleanup_local_dump == "yes":
-        os.remove(local_file)
-        logger.info("Deleted %s.", local_file)
+    if args.cleanup_local_dump == "yes":
+        os.remove(LOCAL_FILE)
+        logger.info("Deleted %s.", LOCAL_FILE)
 
     logger.info("Script %s complete.", __file__)
 
 
 if __name__ == "__main__":
-    setup_logging()
-    args = parse_args()
-    
-    logger.info("Start of script %s.", __file__)
-
-    main(args.bucket, args.local_file, args.cleanup_local_dump)
+    main()
