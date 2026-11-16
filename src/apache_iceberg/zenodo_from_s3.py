@@ -244,6 +244,7 @@ def _sliced_fill(keys, build_row, catalog, identifier, schema, slice_size, worke
     processed = appended = skipped = 0
 
     def commit(rows, last_key):
+        # accumulate values in these variables in the main _sliced_fill function
         nonlocal appended, skipped
         good = [r for r in rows if r is not None]
         skipped += len(rows) - len(good)
@@ -255,20 +256,20 @@ def _sliced_fill(keys, build_row, catalog, identifier, schema, slice_size, worke
             identifier, f"{appended:,}", f"{skipped:,}", last_key,
         )
 
-    # One slice of tasks in flight, at least a couple per worker, so the
-    # pool keeps working while the main thread commits a finished slice.
+    # One slice of tasks in a queue, at least a couple per worker.
+    # The pool keeps working while the main thread commits a finished slice.
     lookahead = max(slice_size, 2 * workers)
     keys_iter = iter(keys)
     with ThreadPoolExecutor(max_workers=workers) as ex:
-        in_flight = deque(
+        fifo_queue = deque(
             (ex.submit(build_row, key), key) for key in islice(keys_iter, lookahead)
         )
         rows, last_key = [], None
-        while in_flight:
-            fut, key = in_flight.popleft()
-            # refill before waiting, so waiting never starves the pool
+        while fifo_queue:
+            fut, key = fifo_queue.popleft()
             for k in islice(keys_iter, 1):
-                in_flight.append((ex.submit(build_row, k), k))
+                # new thread to replace the popped one
+                fifo_queue.append((ex.submit(build_row, k), k))
             rows.append(fut.result())
             last_key = key
             processed += 1
