@@ -1,7 +1,7 @@
 # Run the whole pipeline, downloading the latest Zenodo dump and recreating the Iceberg tables
 
 # S3 bucket to be created with the files from the dump. The records will live in <bucket>/zenodo_dump
-BUCKET="zenodo_dump"
+BUCKET="zenodo-metadata-dump"
 # Iceberg namespace where the tables will be recreated and filled.
 # If the tables already exist, they will be dropped!
 NAMESPACE="harvest-iceberg"
